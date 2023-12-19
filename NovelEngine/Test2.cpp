@@ -2,6 +2,8 @@
 #include "Test2.hpp"
 #include "ElephantLib.hpp"
 
+using namespace ElephantLib;
+
 Test2::Test2(const InitData& init) : IScene{ init } {
 	effectIndex = 0;
 	renderTexture = MSRenderTexture{ Scene::Size() };
@@ -26,30 +28,104 @@ Test2::Test2(const InitData& init) : IScene{ init } {
 	isShowSelection = false;
 
 	isShowingLog = false;
+	isShowingVariable = false;
 
 	savefile = U"./test_save.dat";
 
 	proceedInput = MouseL | KeyEnter | KeySpace;
 }
 
+v_type Test2::stringToVariable(String type, String v) {
+	v_type value;
+	if (type == U"int") {
+		value = v.isEmpty() ? 0 : Parse<int32>(v);
+	}
+	else if (type == U"double") {
+		value = v.isEmpty() ? 0.0 : Parse<double>(v);
+	}
+	else if (type == U"bool") {
+		value = v.isEmpty() ? false : Parse<bool>(v);
+	}
+	else if (type == U"string") {
+		value = v;
+	}
+	return value;
+}
+
+void Test2::setVariable(bool isGrobal, VariableKey key, String type, String v) {
+	v_type value = stringToVariable(type, v);
+
+	if (isGrobal) {
+		getData().grobalVariable[key] = value;
+	}
+	else {
+		variable[key] = value;
+	}
+}
+
+void Test2::loadVariable() {
+	for (auto [k, v] : getData().variable) {
+		variable[k] = v;
+	}
+}
+
 Array<String> Test2::splitArgs(String s) {
 	if (s == U"") {
 		return {};
 	}
+
+	// 変数の置換
+	// 置換についてはString型だとやりにくいためstd::stringに変換して、std::regexで行う
+
+	std::smatch m;
+	std::string nar = s.narrow();
+
+	// 配列も受け取るように
+	// "<([^<>]+)>(|\[\d+\])"
+	// "(<([^<>]+)>|<([^<>]+)(\[\d+\])>)"
+	while (std::regex_search(nar, m, std::regex("<([^<>]+|)>"))) {
+		int32 index = 0;
+		if (m.size() == 4) {
+			index = Parse<int32>(Unicode::Widen(m[2].str()));
+		}
+		std::string b = m[0].str();
+		v_type var = variable[VariableKey{Unicode::Widen(m[1].str()), index}];
+		std::string v = std::visit([](const auto& x) { return Format(x).narrow(); }, var);
+		std::string new_string = std::regex_replace(nar, std::regex(b), v);
+		nar = new_string;
+	}
+	s = Unicode::Widen(nar);
+
+	// 各変数ごとに分割
 	Array<String> args = {};
 	Array<char32> bracket = {};
+	char32 quote = U' '; // " or ' or `
 	String tmp = U"";
 	for (auto i : step(s.length())) {
 		char32 c = s.at(i);
-		bool f = true; //変数を構成する文字かどうか
+
+		for (auto q : { U'\'', U'"', U'`' }) {
+			if (c == q) {
+				if (quote == U' ') {
+					quote = c;
+				}
+				else if (quote == q) {
+					quote = U' ';
+				}
+			}
+		}
+
 		if (c == U'(' || c == U'{') {
 			bracket << c;
 		}
-		else if (c == U')' || c == U'}') {
+		if (c == U')' && U'(' == bracket.back()) {
+			bracket.pop_back();
+		}
+		if (c == U'}' && U'{' == bracket.back()) {
 			bracket.pop_back();
 		}
 
-		if (bracket.isEmpty() && c == U',') {
+		if (bracket.isEmpty() && quote == U' ' && c == U',') {
 			args << tmp;
 			tmp = U"";
 		}
@@ -60,6 +136,76 @@ Array<String> Test2::splitArgs(String s) {
 	args << tmp;
 
 	return args;
+}
+
+
+Array<String> Test2::splitArgs(String s) {
+	if (s == U"") {
+		return {};
+	}
+
+	// 変数の置換
+	// 置換についてはString型だとやりにくいためstd::stringに変換して、std::regexで行う
+
+	std::smatch m;
+	std::string nar = s.narrow();
+
+	// 各変数ごとに分割
+	Array<String> args = {};
+	Array<char32> bracket = {};
+	char32 quote = U' '; // " or ' or `
+	String tmp = U"";
+	for (auto i : step(s.length())) {
+		char32 c = s.at(i);
+
+		for (auto q : { U'\'', U'"', U'`' }) {
+			if (c == q) {
+				if (quote == U' ') {
+					quote = c;
+				}
+				else if (quote == q) {
+					quote = U' ';
+				}
+			}
+		}
+
+		if (c == U'(' || c == U'{') {
+			bracket << c;
+		}
+		if (c == U')' && U'(' == bracket.back()) {
+			bracket.pop_back();
+		}
+		if (c == U'}' && U'{' == bracket.back()) {
+			bracket.pop_back();
+		}
+
+		if (bracket.isEmpty() && quote == U' ' && c == U',') {
+			args << tmp;
+			tmp = U"";
+		}
+		else {
+			tmp << c;
+		}
+	}
+	args << tmp;
+
+	return args;
+}
+
+template<typename T>
+inline void Test2::setVariable(T& v, String s) {
+	v = Parse<T>(s);
+}
+template<>
+inline void Test2::setVariable(String& v, String s) {
+	if (s.front() == '"' && s.back() == '"') {
+		s.pop_front();
+		s.pop_back();
+		v = s;
+	}
+	else {
+		assert(true);
+	}
 }
 
 void Test2::readSetting() {
@@ -77,12 +223,12 @@ void Test2::readSetting() {
 	String line;
 	while (reader.readLine(line)) {
 		// 設定ファイルの項目とその引数の読み込み
-		const auto setting = RegExp(U"\\s*({}):\\s*(.+)"_fmt(list)).search(line);
+		const auto setting = RegExp(U" *({}): *(.+)"_fmt(list)).search(line);
 		StringView st = setting[1].value(); // 処理のタグ
 		const auto tmp = String{ setting[2].value() }.split(',');
 		Array<String> args = {};
 		for (auto i : tmp) {
-			String t = String{ RegExp(U"\\s*(.+)\\s*").search(i)[1].value() }; //前後のスペースを削除
+			String t = String{ RegExp(U" *(.+) *").search(i)[1].value() }; //前後のスペースを削除
 			if (t != U"") {
 				args << t;
 			}
@@ -119,18 +265,29 @@ void Test2::readScript() {
 	auto getArgs = [&, this](StringView sv) {
 		// const auto tmp = String{ sv }.split(',');
 		// カンマ区切りのデータ型(Pointなど)が混じってても問題なく分割できるように設計
-		const auto tmp = splitArgs(String{ sv });
-
 		Array<String> args = {}; // 引き渡された変数
-		for (auto i : tmp) {
-			args << ElephantLib::eraseFrontBackChar(i, U' '); //前後のスペースを削除
+		for (auto i : splitArgs(String{ sv })) {
+			args << eraseFrontBackChar(i, U' '); //前後のスペースを削除
+		}
+		return args;
+	};
+
+	auto _getArgs = [&, this](StringView sv) {
+		Array<std::pair<String, v_type>> args = {}; // 引き渡された変数
+		for (auto i : splitArgs(String{ sv })) {
+			String s = eraseFrontBackChar(i, U' '); //前後のスペースを削除
+			auto r = RegExp(U"([0-9a-zA-Z_]+) *= *(.+)").search(s);
+			String optionName{ r[1].value() };
+			String optionArg{ r[2].value() };
+
+			args << std::make_pair(optionName, optionArg);
 		}
 		return args;
 	};
 
 	// オプション引数の処理
 	auto getOption = [](String o) {
-		auto option = RegExp(U"(.+)\\s*=\\s*(.+)").search(o);
+		auto option = RegExp(U"(.+) *= *(.+)").search(o);
 		String optionName{ option[1].value() };
 		String optionArg{ option[2].value() };
 		return std::make_pair(optionName, optionArg);
@@ -146,7 +303,12 @@ void Test2::readScript() {
 	do {
 		// 各種処理
 		if (operateLine != U"") {
-			Array<String> pn = { U"setting", U"start", U"name", U"setimg", U"chgimg", U"movimg", U"delimg", U"music", U"sound", U"wait", U"goto", U"scenechange", U"call", U"exit"};
+			Array<String> pn = {
+				U"setting", U"start", U"name",
+				U"setimg", U"setbtn", U"change", U"move", U"delete",
+				U"music", U"sound",
+				U"wait", U"goto", U"scenechange", U"call", U"exit"
+			};
 			String proc = U"";
 			for (auto [j, p] : Indexed(pn)) {
 				proc += p;
@@ -156,7 +318,7 @@ void Test2::readScript() {
 			const auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).search(operateLine);
 			if (!operate.isEmpty()) {
 
-				StringView op = operate[1].value(); // 処理のタグ
+				StringView op =	operate[1].value(); // 処理のタグ
 				Array<String> args = getArgs(operate[2].value());
 				if (op == U"setting") {
 					FilePath fp = args.at(0); //設定ファイルのパス
@@ -226,58 +388,55 @@ void Test2::readScript() {
 				}
 
 				if (op == U"setimg") {
-					// tag, pos, filepath, ...option
-					assert(args.size() >= 2);
-
-					String n = args.at(0); // タグの名前
-					FilePath fp;
-					Vec2 p;
+					String n = U""; // タグの名前
+					FilePath fp = U"";
+					Vec2 p = Vec2::Zero();
 					int32 l = 0;
-					int32 w = 0, h = 0;
-					args.pop_front_N(1);
+					Size si = Size::Zero();
 
 					double fa = 0; // フェードインにかかる時間
 					double s = 1.0;
 					for (auto op : args) {
 						auto [option, arg] = getOption(op);
+						if (option == U"tag") {
+							setVariable(n, arg);
+						}
 						if (option == U"pos") {
-							p = Parse<Vec2>(arg);
+							setVariable(p, arg);
 						}
 						if (option == U"path") {
-							fp = arg;
+							setVariable(fp, arg);
 						}
 						if (option == U"fade") {
-							fa = Max(Parse<double>(arg), 0.0);
+							setVariable(fa, arg);
+							fa = Max(fa, 0.0);
 						}
-						if (option == U"width") {
-							w = Max(Parse<int32>(arg), 1);
-						}
-						if (option == U"height") {
-							h = Max(Parse<int32>(arg), 1);
+						if (option == U"size") {
+							setVariable(si, arg);
 						}
 						if (option == U"scale") {
-							s = Max(Parse<double>(arg), 0.0);
+							setVariable(s, arg);
+							s = Max(s, 0.0);
 						}
 						if (option == U"layer") {
-							l = Parse<int32>(arg);
+							setVariable(l, arg);
 						}
 					}
 
 					Image img{ fp }; //画像サイズの計算のために一時的にImageを作成
-					w = w > 0 ? w : img.width();
-					h = h > 0 ? h : img.height();
+					si = si.isZero() ? img.size() : si;
 
-					ImageInfo i{ fp, p, Size{ w, h }, s, 0.0, l, n };
+					auto i = std::make_shared<Graphic>(Graphic{ fp, p, si, s, 0.0, l, n });
 
 					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
-						images.emplace_back(img);
-						images.stable_sort_by([](const ImageInfo& a, const ImageInfo& b) { return a.layer < b.layer; });
+						graphics.emplace_back(img);
+						graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
-							for (auto itr = images.begin(); itr != images.end(); ++itr) {
-								if (itr->tag == tag) {
+							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
-									itr->opacity = t;
+									(*itr)->setOpacity(t);
 								}
 							}
 
@@ -294,17 +453,89 @@ void Test2::readScript() {
 					subProcesses.emplace_back(f());
 				}
 
-				if (op == U"chgimg") {
-					// tag, filepath, ...option
-					assert(args.size() >= 2);
+				if (op == U"setbtn") {
+					String n = U"";
+					FilePath nor = U"", hov = U"", cli = U"";
+					Vec2 p = Vec2::Zero();
+					int32 l = 0;
+					Size si = Size::Zero();
+					String e = U"";
 
-					String n = args.at(0); // タグの名前
+					double fa = 0; // フェードインにかかる時間
+					double s = 1.0;
+					for (auto op : args) {
+						auto [option, arg] = getOption(op);
+						if (option == U"pos") {
+							setVariable(p, arg);
+						}
+						if (option == U"path" || option == U"normal") {
+							setVariable(nor, arg);
+						}
+						if (option == U"hover") {
+							setVariable(hov, arg);
+						}
+						if (option == U"click") {
+							setVariable(cli, arg);
+						}
+						if (option == U"fade") {
+							setVariable(fa, arg);
+							fa = Max(fa, 0.0);
+						}
+						if (option == U"size") {
+							setVariable(si, arg);
+						}
+						if (option == U"scale") {
+							setVariable(s, arg);
+							s = Max(s, 0.0);
+						}
+						if (option == U"layer") {
+							setVariable(l, arg);
+						}
+						if (option == U"exp") {
+							setVariable(e, arg);
+						}
+					}
+
+					Image img{ nor }; //画像サイズの計算のために一時的にImageを作成
+					si = si.isZero() ? img.size() : si;
+
+					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e });
+
+					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
+						double time = 0.0;
+						graphics.emplace_back(img);
+						graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+						return [&, this, time, tag = _n, fade = _fa]() mutable {
+							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
+									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
+									(*itr)->setOpacity(t);
+								}
+							}
+
+							time += Scene::DeltaTime();
+
+							if (time >= fade) {
+								return true;
+							}
+
+							return false;
+						};
+					};
+
+					subProcesses.emplace_back(f());
+				}
+
+				if (op == U"change") {
+					String n; // タグの名前
 					FilePath fp;
 					double fa = 0.0;
-					args.pop_front_N(1);
 
 					for (auto op : args) {
 						auto [option, arg] = getOption(op);
+						if (option == U"tag") {
+							setVariable(n, arg);
+						}
 						if (option == U"path") {
 							fp = arg;
 						}
@@ -315,27 +546,27 @@ void Test2::readScript() {
 
 					std::function<std::function<bool()>()> f = [&, this, _t = n, _fp = fp, _fa = fa]() {
 						double time = 0.0;
-						for (auto itr = images.begin(); itr != images.end(); ++itr) {
-							if (itr->tag == _t) {
-								itr->nextPath = _fp;
-								itr->setNextTexture();
+						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							if ((*itr)->getTag() == _t) {
+								(*itr)->setNextPath(_fp);
+								(*itr)->setNextTexture();
 							}
 						}
 						return [&, this, time, tag = _t, filepath = _fp, fade = _fa]() mutable {
-							for (auto itr = images.begin(); itr != images.end(); ++itr) {
-								if (itr->tag == tag) {
+							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
-									itr->opacity = (1.0 - t);
+									(*itr)->setOpacity(1.0 - t);
 								}
 							}
 
 							time += Scene::DeltaTime();
 
 							if (time >= fade) {
-								for (auto itr = images.begin(); itr != images.end(); ++itr) {
-									if (itr->tag == tag) {
-										itr->changeTexture();
-										itr->opacity = 1.0;
+								for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+									if ((*itr)->getTag() == tag) {
+										(*itr)->changeTexture();
+										(*itr)->setOpacity(1.0);
 									}
 								}
 								return true;
@@ -348,7 +579,7 @@ void Test2::readScript() {
 					subProcesses.emplace_back(f());
 				}
 
-				if (op == U"movimg") {
+				if (op == U"move") {
 					// x, y, duration, tag, ...option
 					Point v{ Parse<int32>(args.at(0)), Parse<int32>(args.at(1)) };
 					double dur = Parse<double>(args.at(2));
@@ -373,9 +604,9 @@ void Test2::readScript() {
 						double time = 0.0;
 						Vec2 src, dst;
 
-						for (auto img : images) {
-							if (img.tag == _ta) {
-								src = img.position;
+						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							if ((*itr)->getTag() == _ta) {
+								src = (*itr)->getPosition();
 								if (_ty == 1) {
 									dst = _v;
 								}
@@ -386,13 +617,13 @@ void Test2::readScript() {
 						}
 
 						return [&, this, time, src, dst, duration = _dur, tag = _ta, type = _ty, delay = _del]() mutable {
-							for (auto itr = images.begin(); itr != images.end(); ++itr) {
-								if (itr->tag == tag) {
+							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
 									double t = duration > 0 ? Clamp((time - delay) / duration, 0.0, 1.0) : 1.0;
-									itr->position = src.lerp(dst, t);
+									(*itr)->setPosition(src.lerp(dst, t));
 
 									if (proceedInput.down()) {
-										itr->position = dst;
+										(*itr)->setPosition(dst);
 										return true;
 									}
 								}
@@ -413,14 +644,16 @@ void Test2::readScript() {
 					subProcesses.emplace_back(f());
 				}
 
-				if (op == U"delimg") {
+				if (op == U"delete") {
 					// tag, ...option
-					String n = args.at(0); // タグの名前
-					args.pop_front_N(1);
+					String n; // タグの名前
 
 					double fa = 0; // フェードアウトにかかる時間
 					for (auto op : args) {
 						auto [option, arg] = getOption(op);
+						if (option == U"tag") {
+							setVariable(n, arg);
+						}
 						if (option == U"fade") {
 							fa = Max(Parse<double>(arg), 0.0);
 						}
@@ -429,19 +662,19 @@ void Test2::readScript() {
 					std::function<std::function<bool()>()> f = [&, this, _n = n, _fa = fa]() {
 						double time = 0.0;
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
-							for (auto itr = images.begin(); itr != images.end(); ++itr) {
-								if (itr->tag == tag) {
+							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
-									itr->opacity = (1.0 - t);
+									(*itr)->setOpacity(1.0 - t);
 								}
 							}
 
 							time += Scene::DeltaTime();
 
 							if (time >= fade) {
-								for (auto itr = images.begin(); itr != images.end(); ) {
-									if (itr->tag == tag) {
-										itr = images.erase(itr);
+								for (auto itr = graphics.begin(); itr != graphics.end(); ) {
+									if ((*itr)->getTag() == tag) {
+										itr = graphics.erase(itr);
 									}
 									else {
 										++itr;
@@ -584,13 +817,14 @@ void Test2::readScript() {
 		readScriptLine(line);
 
 		// コード部分なら一気に読み込んで行く
-		if (RegExp(U"\\s*\\$\\$.*").fullMatch(line)) {
-			String code = String{ RegExp(U"\\s*\\$\\$(.*)").search(line)[1].value() };
+		// 複数行
+		if (RegExp(U" *```.*").fullMatch(line)) {
+			String code = String{ RegExp(U" *```(.*)").search(line)[1].value() };
 			bool isCodeLine = true;
 			while (isCodeLine) {
 				readScriptLine(line);
-				if (RegExp(U".*\\$\\$\\s*").fullMatch(line)) {
-					code += String{ RegExp(U"(.*)\\$\\$\\s*").search(line)[1].value() };
+				if (RegExp(U".*``` *").fullMatch(line)) {
+					code += String{ RegExp(U"(.*)``` *").search(line)[1].value() };
 					isCodeLine = false;
 				}
 				else {
@@ -598,12 +832,17 @@ void Test2::readScript() {
 				}
 			}
 			analyzeCode(code);
-			// Print << code;
+			line = U"";
+		}
+		// 1行
+		if (RegExp(U" *`([^`]*)` *").fullMatch(line)) {
+			String code = String{ RegExp(U" *`([^`]*)` *").match(line)[1].value() };
+			analyzeCode(code);
 			line = U"";
 		}
 
 		// # 始まりと @ 始まりの行は特殊文として処理
-		auto tmp = RegExp(U"\\s*[#@](.*)").search(line);
+		auto tmp = RegExp(U" *[#@](.*)").search(line);
 
 		// 処理が挟まるか空行ならひとかたまりの文章として処理
 		if (!tmp.isEmpty() || line == U"") {
@@ -670,7 +909,7 @@ void Test2::readScript() {
 			}
 		}
 		else {
-			const auto select = RegExp(U"\\s*\\*(.*)\\[(.*)\\]").search(line);
+			const auto select = RegExp(U" *\\*(.*)\\[(.*)\\]").search(line);
 			if (!select.isEmpty()) {
 				// 選択肢を読み込んだら選択肢リストに追加
 				String text{ select[1].value() };
@@ -757,17 +996,143 @@ void Test2::readScript() {
 }
 
 void Test2::analyzeCode(String code){
-	Array<String> exps = code.split(';');
-	for (auto i: step(exps.size())) {
-		String exp = exps.at(i);
-		if (RegExp(U"(int|double|string)\\s(.+)").fullMatch(exp)) {
-			String type = String{ RegExp(U"(int|double|string)\\s(.+)=(.+)").search(exp)[1].value()};
-			String var = String{ RegExp(U"(int|double|string)\\s(.+)=(.+)").search(exp)[2].value() };
-			String value = String{ RegExp(U"(int|double|string)\\s(.+)=(.+)").search(exp)[3].value() };
+	Array<String> exps = {};
 
-			// ElephantLib::eraseFrontBackChar(s, U' ');
+	// split by ";"
+	String tmp = U"";
+	char32 quote = U' ';
+	for (auto i : step(code.length())) {
+		char32 c = code[i];
+
+		for (auto q : { U'\'', U'"', U'`' }) {
+			if (c == q) {
+				if (quote == U' ') {
+					quote = c;
+				}
+				else if (quote == q) {
+					quote = U' ';
+				}
+			}
+		}
+
+		if (c == U';' && quote == U' ') {
+			exps << tmp;
+			tmp = U"";
+		}
+		else {
+			tmp << c;
 		}
 	}
+
+	Array<String> var_type = { U"int", U"double", U"string", U"bool"};
+	String vl = U"";
+	for (auto [j, p] : Indexed(var_type)) {
+		vl += p;
+		if (j != vl.size() - 1) { vl += U"|"; }
+	}
+
+	for (auto i: step(exps.size())) {
+		String exp = eraseFrontBackChar(exps.at(i), U' ');
+
+		/*
+		* grobal int x = 32;
+		* string s = "test";
+		* grobal double array[3] = {1.0, 2.0, 3.0};
+		*/
+		String re = U"(|grobal +)({}) +(\\w+)(|\\[\\d+\\]) += +(.+)"_fmt(vl);
+		if (RegExp(re).fullMatch(exp)) {
+			auto t = RegExp(re).match(exp);
+			if (t.size() != 6) {
+				throw Error{U"syntax error: assignment statement is incorrect.\n{}"_fmt(exp)};
+			}
+
+			bool isGrobal = eraseFrontBackChar(String{ t[1].value() }, U' ') == U"grobal";
+			String type = eraseFrontBackChar(String{ t[2].value() }, U' ');
+			String var = eraseFrontBackChar(String{ t[3].value() }, U' ');
+
+			int32 size = 1;
+			Optional<int32>st = ParseOpt<int32>(eraseBackChar(eraseFrontChar(eraseFrontBackChar(String{ t[4].value() }, U' '), U'['), U']'));
+			if (st.has_value()) {
+				if (st.value() > 1) {
+					size = st.value();
+				}
+			}
+			String value = eraseFrontBackChar(String{ t[5].value() }, U' ');
+
+			if (size > 1) {
+				if (value.front() != U'{' || value.back() != U'}') {
+					throw Error{U"syntax error: value of '{}' is not array"_fmt(value)};
+				}
+
+				// { と } を削除
+				value.pop_front();
+				value.pop_back();
+
+				// カンマ区切り
+				Array<String> v_arr;
+				String tmp = U"";
+				char32 quote = U' ';
+				for (auto j : step(value.length())) {
+					char32 c = value[j];
+
+					for (auto q : { U'\'', U'"', U'`' }) {
+						if (c == q) {
+							if (quote == U' ') {
+								quote = c;
+							}
+							else if (quote == q) {
+								quote = U' ';
+							}
+						}
+					}
+
+					if (c == U',' && quote == U' ') {
+						v_arr << eraseFrontBackChar(tmp, U' ');
+						tmp = U"";
+					}
+					else {
+						tmp << c;
+					}
+				}
+				tmp = eraseFrontBackChar(tmp, U' ');
+				if (!tmp.isEmpty()) {
+					v_arr << tmp;
+				}
+
+				if (v_arr.size() > size) {
+					throw Error{U"array element is too many."};
+				}
+
+				for (auto j : step(size)) {
+					auto key = VariableKey{ var, j };
+					String _v = j < v_arr.size() ? v_arr[j] : U"";
+					setVariable(isGrobal, key, type, _v);
+				}
+			}
+			else {
+				auto key = VariableKey{ var, 0 };
+				Console << U"{} {} = {};"_fmt(type, key.name, value);
+				setVariable(isGrobal, key, type, value);
+			}
+		}
+	}
+
+	Console << U"-------------";
+	Console << U"Variable";
+	for (auto [k, v] : variable) {
+		v_type _v = testReturn(v);
+		std::visit([k = k](auto& x) {
+			Console << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
+		}, _v);
+	}
+	Console << U"\n";
+	Console << U"Grobal Variable";
+	for (auto [k, v] : getData().grobalVariable) {
+		std::visit([k = k](auto& x) {
+			Console << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
+		}, v);
+	}
+	Console << U"-------------";
 }
 
 void Test2::resetTextWindow(Array<String> strs) {
@@ -780,15 +1145,31 @@ void Test2::resetTextWindow(Array<String> strs) {
 
 void Test2::setSaveVariable() {
 	forSaveIndex = scriptIndex;
-	forSaveImages = images;
+
+	Array<Graphic> saveGraphics = {};
+	for (auto g : graphics) {
+		if (typeid((*g)) == typeid(Graphic)) {
+			saveGraphics << *g;
+		}
+	}
+	forSaveGraphics = saveGraphics;
 }
 
 void Test2::update() {
+	// Printをクリア
+	ClearPrint();
 
-	isShowingLog = KeyF5.down() ? !isShowingLog : isShowingLog;
+	if (KeyF5.down()) {
+		isShowingLog = !isShowingLog;
+		isShowingVariable = false;
+	}
+	else if (KeyF6.down()) {
+		isShowingVariable = !isShowingVariable;
+		isShowingLog = false;
+	}
 
 	// ログ見せの場合は何も動かさない
-	if (isShowingLog) {
+	if (isShowingLog || isShowingVariable) {
 		return;
 	}
 
@@ -801,6 +1182,12 @@ void Test2::update() {
 			++itr;
 		}
 	}
+
+	//
+	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+		(*itr)->update();
+	}
+	
 
 	// メイン処理実行
 	if (mainProcess()) {
@@ -823,12 +1210,15 @@ void Test2::update() {
 		Serializer<BinaryWriter> writer{ savefile };
 		if (!writer) throw Error{U"Failed to open SaveFile"};
 
-		Print << U"Saved!";
 		writer(forSaveIndex);
 		writer(operateLine);
 		writer(nowName);
 
-		writer(forSaveImages); //画像をシリアライズして保存はできないので、画像そのものではなく画像情報を保存
+		writer(forSaveGraphics); //画像をシリアライズして保存はできないので、画像そのものではなく画像情報を保存
+
+		//writer(variable);
+
+		Print << U"Saved!";
 	}
 
 	// クイックロード
@@ -836,19 +1226,26 @@ void Test2::update() {
 		Deserializer<BinaryReader> reader{ savefile };
 		if (!reader) throw Error{ U"Failed to open SaveFile" };
 
-		Print << U"Loaded!";
 		reader(scriptIndex);
 		reader(operateLine);
 		reader(nowName);
 
-		reader(images); //画像情報をロード
-		for (auto itr = images.begin(); itr != images.end(); ++itr) {
-			itr->setTexture(); //Textureを設定
+		reader(forSaveGraphics); //画像情報をロード
+		for (auto itr = forSaveGraphics.begin(); itr != forSaveGraphics.end(); ++itr) {
+			graphics << std::make_shared<Graphic>(*itr);
 		}
+
+		for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+			(*itr)->setTexture();
+		}
+
+		//reader(variable);
 
 		// 実行中の各種処理を初期化
 		resetTextWindow({});
 		subProcesses.clear();
+
+		Print << U"Loaded!";
 
 		// 改めて読み込み開始
 		readScript();
@@ -867,11 +1264,26 @@ void Test2::update() {
 
 void Test2::draw() const {
 	if (isShowingLog) {
-		ClearPrint();
+		Print << U"Log";
 		for (auto itr = scenarioLog.begin(); itr != scenarioLog.end(); ++itr) {
 			Print << *itr;
 		}
 		return;
+	}
+
+	if (isShowingVariable) {
+		/*
+		Print << U"Variable";
+		for (auto [k, v] : variable) {
+			Print << U"{} {}[{}] : {}"_fmt(v.type, k.name, k.index, v.value);
+		}
+		Print << U"";
+		Print << U"Grobal Variable";
+		for (auto[k, v] : getData().grobalVariable) {
+			Print << U"{} {}[{}] : {}"_fmt(v.type, k.name, k.index, v.value);
+		}
+		return;
+		*/
 	}
 
 	/*
@@ -902,9 +1314,8 @@ void Test2::draw() const {
 	}
 	*/
 
-
-	for (auto img : images) {
-		img.draw();
+	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+		(*itr)->draw();
 	}
 
 	FontAsset(U"Medium{}"_fmt(nameSize))(nowName).draw(namePos, Palette::White);
@@ -919,4 +1330,37 @@ void Test2::draw() const {
 
 	// フェードインアウトの描画
 	fadeProcess();
+}
+
+void Test2::Graphic::update() {}
+
+void Test2::Graphic::draw() const {
+	if (nextTexture) {
+		texture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
+		nextTexture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, 1.0 - opacity });
+	}
+	else {
+		texture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
+	}
+}
+
+void Test2::Button::update() {
+	if (Rect{ position.asPoint(), size }.mouseOver()) {
+		Cursor::RequestStyle(CursorStyle::Hand);
+	}
+}
+
+void Test2::Button::draw() const {
+	TextureRegion tr;
+	if (click && region().leftPressed()) {
+		tr = click.resized(size);
+	}
+	else if (hover && region().mouseOver()) {
+		tr = hover.resized(size);
+	}
+	else {
+		tr = texture.resized(size);
+	}
+
+	if (texture || hover || click) tr.draw(position);
 }
