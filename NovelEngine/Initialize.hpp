@@ -9,4 +9,6 @@ public:
 	void draw() const override;
 
 private:
+	void saveVariable();
+	void loadVariable();
 };

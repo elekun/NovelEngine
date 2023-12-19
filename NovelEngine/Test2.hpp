@@ -19,8 +19,22 @@ private:
 	};
 	ConstantBuffer<EffectSetting> cb;
 
+	// ゲーム内変数
+	HashTable<VariableKey, v_type> variable;
+	v_type stringToVariable(String type = U"string", String v = U"");
+	void setVariable(bool isGrobal, VariableKey key, String type = U"string", String v = U"");
+	
+	void loadVariable();
+
+	v_type testReturn(v_type v) { v_type value = v; return value; };
+
 	// 汎用関数
 	Array<String> splitArgs(String s);
+	Array<String> _splitArgs(String s);
+	template<typename T>
+	void setVariable(T& v, String s);
+	template<>
+	void setVariable(String& v, String s);
 
 	// ゲーム初期設定変数
 	FilePath settingfile;
@@ -39,7 +53,6 @@ private:
 	void readScriptLine(String& s);
 	void readScript();
 	void analyzeCode(String code);
-	HashTable<String, String> variables;
 
 	// 全処理共通変数
 	std::function<bool()> mainProcess;
@@ -60,7 +73,8 @@ private:
 	std::function<void()> fadeProcess;
 
 	// 画像表示用変数
-	struct ImageInfo {
+	class Graphic {
+	protected:
 		Texture texture;
 		FilePath path;
 		Texture nextTexture;
@@ -72,26 +86,70 @@ private:
 		int32 layer;
 		String tag;
 	public:
-		ImageInfo() : texture(Texture{ U"" }), position(0, 0), size(0, 0), scale(1.0), opacity(1.0), layer(0), tag(U"") {};
-		ImageInfo(FilePath fp, Vec2 p, Size s, double sc, double o, int32 l, String t) :
+		Graphic() : texture(Texture{ U"" }), position(0, 0), size(0, 0), scale(1.0), opacity(1.0), layer(0), tag(U"") {};
+		Graphic(FilePath fp, Vec2 p, Size s, double sc, double o, int32 l, String t) :
 			texture(Texture{ fp }), path(fp), nextTexture(Texture{ U""}), nextPath(U""), position(p), size(s), scale(sc), opacity(o), layer(l), tag(t) {};
-		void setTexture() { texture = Texture{ path }; };
-		void setNextTexture() { nextTexture = Texture{ nextPath }; };
-		void changeTexture() { path = nextPath; texture = nextTexture; nextPath = U""; nextTexture = Texture{ U"" }; };
+
+		// getter
+		int32 getLayer() const { return layer; };
+		String getTag() const { return tag; };
+		Vec2 getPosition() const { return position; };
+
+		// setter
+		void setPath(String p) { path = p; };
+		virtual void setTexture() { texture = Texture{ path }; };
+		void setNextPath(String p) { nextPath = p; };
+		virtual void setNextTexture() { nextTexture = Texture{ nextPath }; };
+		void setOpacity(double o) { opacity = o; };
+		void setPosition(Vec2 p) { position = p; };
+
 		template <class Archive>
 		void SIV3D_SERIALIZE(Archive& archive) { archive(path, position, size, scale, opacity, layer, tag); };
 
-		void draw() const{
-			if (nextTexture) {
-				texture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
-				nextTexture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, 1.0 - opacity });
-			}
-			else {
-				texture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
-			}
-		}
+		Rect region() const { return Rect{ position.asPoint(), size }; };
+		virtual void changeTexture() { path = nextPath; texture = nextTexture; nextPath = U""; nextTexture = Texture{ U"" }; };
+
+		virtual void update();
+		void draw() const;
 	};
-	Array<ImageInfo> images;
+
+	class Button : public Graphic{
+	protected:
+		Texture hover;
+		FilePath hoverPath;
+		Texture nextHover;
+		FilePath nextHoverPath;
+		Texture click;
+		FilePath clickPath;
+		Texture nextClick;
+		FilePath nextClickPath;
+		String exp; // クリック時に動作するスクリプト
+
+	public:
+		Button() : Graphic{} {};
+		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e) :
+			hoverPath(h), clickPath(c), exp(e), Graphic{n, p, s, sc, o, l, t} {};
+
+		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };
+		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };
+		void setNextPath(String p, String h, String c) { nextPath = p; nextHoverPath = h; nextClickPath = c; };
+		void setNextTexture() { nextTexture = Texture{ nextPath }; nextHover = Texture{ nextHoverPath }; nextClick = Texture{ nextClickPath }; };
+
+		template <class Archive>
+		void SIV3D_SERIALIZE(Archive& archive) { archive(path, position, size, scale, opacity, layer, tag); };
+
+		void changeTexture() override {
+			path = nextPath; texture = nextTexture; nextPath = U""; nextTexture = Texture{ U"" };
+			hoverPath = nextHoverPath; hover = nextHover; nextHoverPath = U""; nextHover = Texture{ U"" };
+			clickPath = nextClickPath; click = nextClick; nextClickPath = U""; nextClick = Texture{ U"" };
+		};
+
+		void update() override;
+		void draw() const;
+	};
+
+
+	Array<std::shared_ptr<Graphic>> graphics;
 
 	// 音声用変数
 	Audio nowMusic;
@@ -138,9 +196,10 @@ private:
 	// データセーブ用
 	FilePath savefile;
 	size_t forSaveIndex; // セーブするスクリプトの行番号, メイン処理のうち前に実行したもの
-	Array<ImageInfo> forSaveImages;
+	Array<Graphic> forSaveGraphics;
 	void setSaveVariable();
 
 	// デバッグ用
 	bool isShowingLog;
+	bool isShowingVariable;
 };
