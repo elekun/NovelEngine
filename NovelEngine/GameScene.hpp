@@ -43,3 +43,4 @@ using GameManager = SceneManager<GameScene, GameData>;
 #include "Test.hpp"
 #include "Test2.hpp"
 #include "Initialize.hpp"
+#include "MyError.hpp"

@@ -30,11 +30,12 @@ private:
 
 	// 汎用関数
 	Array<String> splitArgs(String s);
-	Array<String> _splitArgs(String s);
 	template<typename T>
-	void setVariable(T& v, String s);
-	template<>
-	void setVariable(String& v, String s);
+	void setArgument(StringView op, StringView option, T& v, v_type arg);
+	template<typename T>
+	void setArgumentParse(StringView op, StringView option, T& v, v_type arg);
+	template <>
+	void setArgumentParse(StringView op, StringView option, String& v, v_type arg);
 
 	// ゲーム初期設定変数
 	FilePath settingfile;
