@@ -102,6 +102,10 @@ bool Lexer::isStringStart(char32 c) {
 	return c == U'"';
 }
 
+bool Lexer::isBracketStart(char32 c) {
+	return c == U'[' || c == U']';
+}
+
 shared_ptr<Token> Lexer::sign() {
 	Token t = Token{ U"sign", U"" };
 	char32 c1 = next();
@@ -222,5 +226,9 @@ shared_ptr<Token> Lexer::str() {
 	}
 	next();
 	return make_shared<Token>(Token{ U"string", s });
+}
+
+shared_ptr<Token> Lexer::bracket() {
+	return make_shared<Token>(Token{ U"bracket", String{next()} });
 }
 

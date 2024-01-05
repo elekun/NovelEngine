@@ -26,6 +26,7 @@ private:
 	bool isCurlyStart(char32 c);
 	bool isSymbolStart(char32 c);
 	bool isStringStart(char32 c);
+	bool isBracketStart(char32 c);
 	shared_ptr<Token> sign();
 	shared_ptr<Token> digit();
 	shared_ptr<Token> ident();
@@ -33,5 +34,6 @@ private:
 	shared_ptr<Token> curly();
 	shared_ptr<Token> symbol();
 	shared_ptr<Token> str();
+	shared_ptr<Token> bracket();
 };
 
