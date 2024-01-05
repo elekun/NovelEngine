@@ -13,20 +13,18 @@ private:
 	size_t effectIndex;
 	MSRenderTexture renderTexture;
 
-
 	struct EffectSetting {
 		float level;
 	};
 	ConstantBuffer<EffectSetting> cb;
 
+
+
 	// ゲーム内変数
 	HashTable<VariableKey, v_type> variable;
 	v_type stringToVariable(String type = U"string", String v = U"");
 	void setVariable(bool isGrobal, VariableKey key, String type = U"string", String v = U"");
-	
 	void loadVariable();
-
-	v_type testReturn(v_type v) { v_type value = v; return value; };
 
 	// 汎用関数
 	Array<String> splitArgs(String s);
@@ -37,7 +35,7 @@ private:
 	template <>
 	void setArgumentParse(StringView op, StringView option, String& v, v_type arg);
 
-	// ゲーム初期設定変数
+	// ゲーム用システム変数
 	FilePath settingfile;
 	int32 textSize;
 	int32 nameSize;
@@ -45,7 +43,11 @@ private:
 	Point namePos;
 	Rect textRect;
 	void readSetting();
-	
+
+	bool isAuto;
+
+
+
 	// スクリプト用変数
 	Array<String> scriptLines;
 	size_t scriptIndex;
@@ -148,7 +150,6 @@ private:
 		void update() override;
 		void draw() const;
 	};
-
 
 	Array<std::shared_ptr<Graphic>> graphics;
 

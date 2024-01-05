@@ -21,6 +21,7 @@ Test2::Test2(const InitData& init) : IScene{ init } {
 	scriptLines = reader.readLines();
 	scriptIndex = 0;
 	forSaveIndex = 0;
+	readStopFlag = false;
 
 	strIndex = 0;
 	indexCT = 0.05;
@@ -197,6 +198,8 @@ void Test2::readSetting() {
 
 void Test2::readScriptLine(String& s) {
 	if (scriptIndex >= scriptLines.size()) {
+		s = U"";
+		readStopFlag = true;
 		return;
 	}
 	s = scriptLines.at(scriptIndex);
@@ -205,7 +208,7 @@ void Test2::readScriptLine(String& s) {
 
 void Test2::readScript() {
 	String line;
-	bool readStopFlag = false;
+	readStopFlag = false;
 
 	auto getArgs = [&, this](StringView sv) {
 		Array<std::pair<String, v_type>> args = {}; // 引き渡された変数
@@ -289,15 +292,6 @@ void Test2::readScript() {
 			throw Error{U"{} は値として不適切です"_fmt(optionArg)};
 		}
 
-
-		Console << U"Argument-----\n";
-		for (auto [k, v] : args) {
-			std::visit([k = k](auto& x) {
-				Console << U"{}({}) = {}; "_fmt(k, Unicode::Widen(typeid(x).name()), x);
-			}, v);
-		}
-		Console << U"\n-----------\n";
-
 		return args;
 	};
 
@@ -306,21 +300,23 @@ void Test2::readScript() {
 		readStopFlag = true;
 	};
 
+	// 命令
+	Array<String> pn = {
+		U"setting", U"start", U"name",
+		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
+		U"music", U"sound",
+		U"wait", U"goto", U"scenechange", U"call", U"exit"
+	};
+	String proc = U"";
+	for (auto [j, p] : Indexed(pn)) {
+		proc += p;
+		if (j != pn.size() - 1) { proc += U"|"; }
+	}
+
 	// 文章を読み込む処理
 	do {
 		// 各種処理
 		if (operateLine != U"") {
-			Array<String> pn = {
-				U"setting", U"start", U"name",
-				U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
-				U"music", U"sound",
-				U"wait", U"goto", U"scenechange", U"call", U"exit"
-			};
-			String proc = U"";
-			for (auto [j, p] : Indexed(pn)) {
-				proc += p;
-				if (j != pn.size() - 1) { proc += U"|"; }
-			}
 
 			const auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).search(operateLine);
 			if (!operate.isEmpty()) {
@@ -1068,7 +1064,6 @@ void Test2::readScript() {
 			}
 		}
 
-		Console << U"1 loop";
 	} while (!readStopFlag);
 
 
@@ -1141,7 +1136,7 @@ void Test2::analyzeCode(String code){
 		}
 	}
 
-	Array<String> var_type = { U"int", U"double", U"string", U"bool"};
+	Array<String> var_type = { U"int", U"double", U"string", U"bool", U"point"};
 	String vl = U"";
 	for (auto [j, p] : Indexed(var_type)) {
 		vl += p;
@@ -1152,11 +1147,12 @@ void Test2::analyzeCode(String code){
 		String exp = eraseFrontBackChar(exps.at(i), U' ');
 
 		/*
+		* 変数宣言＆初期化
 		* grobal int x = 32;
 		* string s = "test";
 		* grobal double array[3] = {1.0, 2.0, 3.0};
 		*/
-		String re = U"(|grobal +)({}) +(\\w+)(|\\[\\d+\\]) += +(.+)"_fmt(vl);
+		String re = U"(|grobal +)({}) +([a-zA-Z_]\\w*)(|\\[\\d+\\]) += +(.+)"_fmt(vl);
 		if (RegExp(re).fullMatch(exp)) {
 			auto t = RegExp(re).match(exp);
 			if (t.size() != 6) {
@@ -1228,7 +1224,6 @@ void Test2::analyzeCode(String code){
 			}
 			else {
 				auto key = VariableKey{ var, 0 };
-				// Console << U"{} {} = {};"_fmt(type, key.name, value);
 				setVariable(isGrobal, key, type, value);
 			}
 		}
@@ -1283,7 +1278,7 @@ void Test2::update() {
 		}
 	}
 
-	//
+	// 画像系の逐次処理
 	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
 		(*itr)->update();
 	}
@@ -1316,7 +1311,38 @@ void Test2::update() {
 
 		writer(forSaveGraphics); //画像をシリアライズして保存はできないので、画像そのものではなく画像情報を保存
 
-		//writer(variable);
+		// 変数書き込み
+		Array<VariableKey> k_tmp;
+		Array<v_type> v_tmp;
+		Array<String> t_tmp;
+		for (auto [k, v] : variable) {
+			k_tmp << k;
+			v_tmp << v;
+			if (auto* p = std::get_if<int32>(&v)) {
+				t_tmp << U"int";
+			}
+			else if (auto* p = std::get_if<String>(&v)) {
+				t_tmp << U"string";
+			}
+			else if (auto* p = std::get_if<double>(&v)) {
+				t_tmp << U"double";
+			}
+			else if (auto* p = std::get_if<bool>(&v)) {
+				t_tmp << U"bool";
+			}
+			else if (auto* p = std::get_if<Point>(&v)) {
+				t_tmp << U"point";
+			}
+		}
+
+		writer(t_tmp); //保存する変数の型のリスト
+		for (auto i : step(k_tmp.size())) {
+			writer(k_tmp[i]); // 変数名
+			std::visit([&writer](auto& x) {
+				writer(x); // 値
+			}, v_tmp[i]);
+		}
+		// -------
 
 		Print << U"Saved!";
 	}
@@ -1331,6 +1357,7 @@ void Test2::update() {
 		reader(nowName);
 
 		reader(forSaveGraphics); //画像情報をロード
+		graphics.clear();
 		for (auto itr = forSaveGraphics.begin(); itr != forSaveGraphics.end(); ++itr) {
 			graphics << std::make_shared<Graphic>(*itr);
 		}
@@ -1339,7 +1366,42 @@ void Test2::update() {
 			(*itr)->setTexture();
 		}
 
-		//reader(variable);
+		variable.clear();
+		Array<String> typeList;
+		reader(typeList); //変数リスト
+		for (String t : typeList) {
+			VariableKey k;
+			v_type v;
+
+			reader(k);
+			if (t == U"int") {
+				int32 _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"string") {
+				String _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"bool") {
+				bool _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"double") {
+				double _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"point") {
+				Point _;
+				reader(_);
+				v = _;
+			}
+
+			variable[k] = v;
+		}
 
 		// 実行中の各種処理を初期化
 		resetTextWindow({});

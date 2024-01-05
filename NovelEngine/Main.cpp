@@ -1,5 +1,8 @@
 ﻿#include <Siv3D.hpp>
 #include "GameScene.hpp"
+#include "Lexer.hpp"
+#include "Parser.hpp"
+#include "Interpreter.hpp"
 
 void registerFontAsset() {
 	for (auto i : Range(1, 256)) {
@@ -31,6 +34,19 @@ void Main() {
 	manager.add<Test2>(GameScene::Test2);
 
 	manager.init(GameScene::Initialize);
+
+	String text = U"\
+	var object = \"\"\
+	if (!object) {\
+		object = \"world\"\
+	}\
+	println(\"Hello \" + object + \"!\")\
+	";
+	auto tokens = Lexer().init(text).tokenize();
+	auto blk = Parser().init(tokens).block();
+	HashTable<String, shared_ptr<Variable>> vars = {};
+	vars = Interpreter().init(blk, vars).run();
+	
 
 	while (System::Update()) {
 		if (!manager.update()) {

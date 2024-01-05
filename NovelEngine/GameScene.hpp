@@ -30,7 +30,26 @@ struct std::hash<VariableKey> {
 	}
 };
 
-using v_type = std::variant<int32, double, String, bool, Point>;
+struct mono {
+	friend void Formatter(FormatData& formatData, const mono& m){
+		formatData.string += U"empty";
+	}
+};
+
+template<>
+struct SIV3D_HIDDEN fmt::formatter<mono, s3d::char32> {
+	std::u32string tag;
+	auto parse(basic_format_parse_context<s3d::char32>& ctx){
+		return s3d::detail::GetFormatTag(tag, ctx);
+	}
+	template <class FormatContext>
+	auto format(const mono& value, FormatContext& ctx) {
+		return format_to(ctx.out(), U"monostate");
+	}
+};
+
+using v_type = std::variant<mono, int32, double, String, bool, Point>;
+using TYPE = std::variant<mono, int32, String, double>;
 
 struct GameData {
 	FilePath scriptPath;
