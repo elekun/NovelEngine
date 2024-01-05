@@ -1,9 +1,12 @@
 ﻿#include "stdafx.h"
 #include "Parser.hpp"
 
+shared_ptr<Token> Parser::blank = make_shared<Token>(Token{ U"blank", U"" });
+
 Parser::Parser() {
 	degrees = {};
 	degrees.emplace(U"(", 80);
+	degrees.emplace(U"[", 80);
 	degrees.emplace(U"*", 60);
 	degrees.emplace(U"/", 60);
 	degrees.emplace(U"+", 50);
@@ -91,6 +94,9 @@ shared_ptr<Token> Parser::lead(shared_ptr<Token> token) {
 		consume(U")");
 		return expr;
 	}
+	else if (token->kind == U"bracket" && token->value == U"[") {
+		return newArray(token);
+	}
 	else {
 		throw Error{U"The token can't place there"};
 	}
@@ -132,6 +138,12 @@ shared_ptr<Token> Parser::bind(shared_ptr<Token> left, shared_ptr<Token> op) {
 			}
 		}
 		consume(U")");
+		return op;
+	}
+	else if (op->kind == U"bracket" && op->value == U"[") {
+		op->left = left;
+		op->right = expression(0);
+		consume(U"]");
 		return op;
 	}
 	else {
@@ -253,6 +265,33 @@ shared_ptr<Token> Parser::var(shared_ptr<Token> token) {
 			item = ident;
 		}
 		token->block << item;
+	}
+	return token;
+}
+
+shared_ptr<Token> Parser::newArray(shared_ptr<Token> token) {
+	token->kind = U"newArray";
+	token->params = {};
+	while (true) {
+		if (this->token()->value == U"]") {
+			consume(U"]");
+			break;
+		}
+		if (this->token()->value == U",") {
+			token->params << Parser::blank;
+			consume(U",");
+			continue;
+		}
+		token->params << expression(0);
+		if (this->token()->value == U",") {
+			consume(U",");
+			continue;
+		}
+		else {
+			consume(U"]");
+			break;
+		}
+
 	}
 	return token;
 }

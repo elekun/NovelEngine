@@ -30,6 +30,9 @@ shared_ptr<Token> Lexer::nextToken() {
 	else if (isCurlyStart(nowc())) {
 		return curly();
 	}
+	else if (isBracketStart(nowc())) {
+		return bracket();
+	}
 	else if (isSymbolStart(nowc())) {
 		return symbol();
 	}

@@ -112,7 +112,6 @@ r_type Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Opt
 }
 
 r_type Interpreter::expression(shared_ptr<Token> expr) {
-	Logger << U"{} {}"_fmt(expr->kind, expr->value);
 	if (expr->kind == U"digit") {
 		return digit(expr); // return TYPE
 	}
@@ -121,6 +120,15 @@ r_type Interpreter::expression(shared_ptr<Token> expr) {
 	}
 	else if (expr->kind == U"ident") {
 		return ident(expr); // return Variable or Func
+	}
+	else if (expr->kind == U"blank") {
+		return blank(expr);
+	}
+	else if (expr->kind == U"newArray") {
+		return newArray(expr);
+	}
+	else if (expr->kind == U"bracket") {
+		return accessArray(expr);
 	}
 	else if (expr->kind == U"func") {
 		return func(expr); // return nullptr?
@@ -182,6 +190,9 @@ shared_ptr<Variable> Interpreter::variable(r_type value) {
 
 r_type Interpreter::value(r_type v) {
 	if (auto p = get_if<TYPE>(&v)) {
+		return *p;
+	}
+	else if (auto p = get_if<Array<TYPE>>(&v)) {
 		return *p;
 	}
 	else if (auto p = get_if<shared_ptr<DynamicFunc>>(&v)) {
@@ -536,6 +547,48 @@ shared_ptr<DynamicFunc> Interpreter::fexpr(shared_ptr<Token> token) {
 
 r_type Interpreter::str(shared_ptr<Token> token) {
 	return token->value;
+}
+
+r_type Interpreter::blank(shared_ptr<Token> token) {
+	return mono{};
+}
+
+r_type Interpreter::newArray(shared_ptr<Token> expr) {
+	Array<TYPE> a = {};
+	for (auto item : expr->params) {
+		a << checkTYPEValue(value(expression(item)));
+	}
+	return a;
+}
+
+r_type Interpreter::accessArray(shared_ptr<Token> expr) {
+	r_type ar = arr(expression(expr->left));
+	int32 index = integer(expression(expr->right));
+
+	if (auto p = get_if<Array<TYPE>>(&ar)) {
+		return (*p)[index];
+	}
+	else if (auto p = get_if<TYPE>(&ar)) {
+		if (auto q = get_if<String>(p)) {
+			return String{ q->at(index) };
+		}
+	}
+	throw Error{U"array access error"};
+}
+
+r_type Interpreter::arr(r_type v) {
+	if (auto p = get_if<Array<TYPE>>(&v)) {
+		return *p;
+	}
+	else if (auto p = get_if<TYPE>(&v)) {
+		if (auto q = get_if<String>(p)) {
+			return *q;
+		}
+	}
+	else if (auto p = get_if<shared_ptr<Variable>>(&v)) {
+		return arr((*p)->value);
+	}
+	throw Error{U"right value error"};
 }
 
 

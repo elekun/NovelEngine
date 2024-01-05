@@ -6,6 +6,7 @@ public:
 	Parser();
 	Parser& init(Array<shared_ptr<Token>> ts);
 	Array<shared_ptr<Token>> block();
+	static shared_ptr<Token> blank;
 private:
 	HashTable<String, int32> degrees;
 	Array<String> factorKinds;
@@ -29,5 +30,6 @@ private:
 	Array<shared_ptr<Token>> body();
 	shared_ptr<Token> while_(shared_ptr<Token> token);
 	shared_ptr<Token> var(shared_ptr<Token> token);
+	shared_ptr<Token> newArray(shared_ptr<Token> token);
 };
 

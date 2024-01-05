@@ -36,11 +36,8 @@ void Main() {
 	manager.init(GameScene::Initialize);
 
 	String text = U"\
-	var object = \"\"\
-	if (!object) {\
-		object = \"world\"\
-	}\
-	println(\"Hello \" + object + \"!\")\
+	var ar = \"abcde\"\
+	println(ar[2])\
 	";
 	auto tokens = Lexer().init(text).tokenize();
 	auto blk = Parser().init(tokens).block();

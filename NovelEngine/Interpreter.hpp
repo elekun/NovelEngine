@@ -10,7 +10,7 @@ class DynamicFunc;
 
 using namespace std;
 
-using r_type = variant<shared_ptr<Variable>, shared_ptr<Func>, shared_ptr<DynamicFunc>, TYPE>;
+using r_type = variant<shared_ptr<Variable>, shared_ptr<Func>, shared_ptr<DynamicFunc>, TYPE, Array<TYPE>>;
 
 // Ident definition
 
@@ -111,5 +111,9 @@ public:
 	shared_ptr<Variable> newVariable(String name);
 	shared_ptr<DynamicFunc> fexpr(shared_ptr<Token> token);
 	r_type str(shared_ptr<Token> token);
+	r_type blank(shared_ptr<Token> token);
+	r_type newArray(shared_ptr<Token> expr);
+	r_type accessArray(shared_ptr<Token> expr);
+	r_type arr(r_type v);
 };
 
