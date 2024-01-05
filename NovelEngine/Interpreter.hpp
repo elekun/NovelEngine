@@ -2,6 +2,7 @@
 #include <memory>
 #include "GameScene.hpp"
 #include "Token.hpp"
+#include <any>
 
 class Interpreter;
 class Variable;
@@ -10,25 +11,25 @@ class DynamicFunc;
 
 using namespace std;
 
-using r_type = variant<shared_ptr<Variable>, shared_ptr<Func>, shared_ptr<DynamicFunc>, TYPE, Array<TYPE>>;
+//using std::any = variant<shared_ptr<Variable>, shared_ptr<Func>, shared_ptr<DynamicFunc>, TYPE, Array<TYPE>>;
 
 // Ident definition
 
 class Variable {
 public:
 	String name;
-	r_type value;
+	std::any value;
 	Variable() {};
-	Variable(String n, r_type v) : name(n), value(v) {};
+	Variable(String n, std::any v) : name(n), value(v) {};
 
 	String toString() {
 		String s;
-		if (auto p = get_if<TYPE>(&value)) {
+		if (auto p = std::any_cast<TYPE>(&value)) {
 			std::visit([&s](auto& x) {
 				s = Format();
 			}, *p);
 		}
-		else if (auto p = get_if<shared_ptr<Variable>>(&value)) {
+		else if (auto p = std::any_cast<shared_ptr<Variable>>(&value)) {
 			s = U"Variable";
 		}
 		else {
@@ -43,7 +44,7 @@ public:
 	String name;
 	Func() {};
 	Func(String n) : name(n) {};
-	virtual r_type invoke(Array<r_type> args) { return mono{}; }; //return Variable
+	virtual std::any invoke(Array<std::any> args) { return mono{}; }; //return Variable
 };
 
 class DynamicFunc : public Func {
@@ -52,13 +53,13 @@ public:
 	Array<shared_ptr<Token>> params;
 	Array<shared_ptr<Token>> block;
 	DynamicFunc(shared_ptr<Interpreter> c, String n, Array<shared_ptr<Token>> p, Array<shared_ptr<Token>> b) : Func(n), context(c), params(p), block(b) {};
-	r_type invoke(Array<r_type> args) override;
+	std::any invoke(Array<std::any> args) override;
 };
 
 class Println : public Func {
 public:
 	Println() : Func(U"println") {};
-	r_type invoke(Array<r_type> args) override;
+	std::any invoke(Array<std::any> args) override;
 };
 
 class Scope {
@@ -83,37 +84,36 @@ public:
 	Interpreter(){};
 	Interpreter& init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs);
 	HashTable<String, shared_ptr<Variable>> run();
-	r_type process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk);
-	r_type expression(shared_ptr<Token> expr);
+	std::any process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk);
+	std::any expression(shared_ptr<Token> expr);
 	int32 digit(shared_ptr<Token> token);
-	r_type ident(shared_ptr<Token> token);
+	std::any ident(shared_ptr<Token> token);
 	shared_ptr<Variable> assign(shared_ptr<Token> expr);
-	shared_ptr<Variable> variable(r_type value);
-	r_type value(r_type v);
-	TYPE checkTYPEValue(r_type v);
-	int32 integer(r_type v);
-	String str(r_type v);
-	TYPE calc(shared_ptr<Token> expr);
-	TYPE calcInt(String sign, int32 left, int32 right);
-	TYPE calcString(String sign, String left, String right);
-	TYPE unaryCalc(shared_ptr<Token> expr);
+	shared_ptr<Variable> variable(std::any value);
+	std::any value(std::any v);
+	int32 integer(std::any v);
+	String str(std::any v);
+	std::any calc(shared_ptr<Token> expr);
+	int32 calcInt(String sign, int32 left, int32 right);
+	std::any calcString(String sign, String left, String right);
+	std::any unaryCalc(shared_ptr<Token> expr);
 	int32 unaryCalcInt(String sign, int32 left);
 	int32 unaryCalcString(String sign, String left);
-	r_type invoke(shared_ptr<Token> expr);
-	shared_ptr<Func> func(r_type v);
-	TYPE func(shared_ptr<Token> token);
-	r_type if_(shared_ptr<Token> token, Optional<bool>& ret, Optional<bool>& brk);
+	std::any invoke(shared_ptr<Token> expr);
+	shared_ptr<Func> func(std::any v);
+	std::any func(shared_ptr<Token> token);
+	std::any if_(shared_ptr<Token> token, Optional<bool>& ret, Optional<bool>& brk);
 	bool isTrue(shared_ptr<Token> token);
-	bool isTrue(r_type v);
+	bool isTrue(std::any v);
 	int32 toInt(bool b);
-	r_type while_(shared_ptr<Token> token, Optional<bool>& ret);
-	r_type var(shared_ptr<Token> token);
+	std::any while_(shared_ptr<Token> token, Optional<bool>& ret);
+	std::any var(shared_ptr<Token> token);
 	shared_ptr<Variable> newVariable(String name);
 	shared_ptr<DynamicFunc> fexpr(shared_ptr<Token> token);
-	r_type str(shared_ptr<Token> token);
-	r_type blank(shared_ptr<Token> token);
-	r_type newArray(shared_ptr<Token> expr);
-	r_type accessArray(shared_ptr<Token> expr);
-	r_type arr(r_type v);
+	std::any str(shared_ptr<Token> token);
+	std::any blank(shared_ptr<Token> token);
+	std::any newArray(shared_ptr<Token> expr);
+	std::any accessArray(shared_ptr<Token> expr);
+	std::any arr(std::any v);
 };
 

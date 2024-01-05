@@ -1,14 +1,15 @@
 ﻿#include "stdafx.h"
 #include "Interpreter.hpp"
 
-r_type Println::invoke(Array<r_type> args) {
+std::any Println::invoke(Array<std::any> args) {
 	for (int32 i = 0; i < args.size(); i++) {
-		if (auto p = get_if<TYPE>(&args[i])) {
-			std::visit([](auto& x) {
-				Console << x;
-			}, *p);
+		if (auto p = std::any_cast<int32>(&args[i])) {
+			Console << *p;
 		}
-		else if (auto p = get_if<shared_ptr<Variable>>(&args[i])) {
+		else if (auto p = std::any_cast<String>(&args[i])) {
+			Console << *p;
+		}
+		else if (auto p = std::any_cast<shared_ptr<Variable>>(&args[i])) {
 			Console << U"Variable";
 		}
 		else {
@@ -22,7 +23,7 @@ r_type Println::invoke(Array<r_type> args) {
 	return mono{};
 }
 
-r_type DynamicFunc::invoke(Array<r_type> args) {
+std::any DynamicFunc::invoke(Array<std::any> args) {
 	shared_ptr<Scope> parent = context->local;
 	context->local = make_shared<Scope>(Scope{});
 	context->local->parent = parent;
@@ -39,7 +40,7 @@ r_type DynamicFunc::invoke(Array<r_type> args) {
 	}
 	Optional<bool> ret = false;
 	Optional<bool> brk;
-	r_type val = context->process(block, ret, brk);
+	std::any val = context->process(block, ret, brk);
 	context->local = parent;
 	return val;
 }
@@ -68,10 +69,10 @@ HashTable<String, shared_ptr<Variable>> Interpreter::run() {
 	return grobal->variables;
 }
 
-r_type Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk) {
+std::any Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk) {
 	for (auto expr : b) {
 		if (expr->kind == U"if") {
-			r_type val = if_(expr, ret, brk);
+			std::any val = if_(expr, ret, brk);
 			if (ret.has_value() && ret.value()) {
 				return val;
 			}
@@ -89,7 +90,7 @@ r_type Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Opt
 			}
 		}
 		else if (expr->kind == U"while") {
-			r_type val = while_(expr, ret);
+			std::any val = while_(expr, ret);
 			if (ret.has_value() && ret.value()) {
 				return val;
 			}
@@ -111,7 +112,7 @@ r_type Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Opt
 	return mono{};
 }
 
-r_type Interpreter::expression(shared_ptr<Token> expr) {
+std::any Interpreter::expression(shared_ptr<Token> expr) {
 	if (expr->kind == U"digit") {
 		return digit(expr); // return TYPE
 	}
@@ -157,7 +158,7 @@ int32 Interpreter::digit(shared_ptr<Token> token) {
 	return Parse<int32>(token->value);
 }
 
-r_type Interpreter::ident(shared_ptr<Token> token) {
+std::any Interpreter::ident(shared_ptr<Token> token) {
 	String name = token->value;
 	shared_ptr<Scope> scope = local;
 	while (scope != nullptr) {
@@ -174,31 +175,34 @@ r_type Interpreter::ident(shared_ptr<Token> token) {
 
 shared_ptr<Variable> Interpreter::assign(shared_ptr<Token> expr) {
 	shared_ptr<Variable> var = variable(expression(expr->left));
-	r_type v = value(expression(expr->right));
+	std::any v = value(expression(expr->right));
 	var->value = v;
 	return var;
 }
 
-shared_ptr<Variable> Interpreter::variable(r_type value) {
-	if (auto p = get_if<shared_ptr<Variable>>(&value)) {
-		return *p;
+shared_ptr<Variable> Interpreter::variable(std::any value) {
+	if (auto p = std::any_cast<shared_ptr<Variable>>(value)) {
+		return p;
 	}
 	else {
 		throw Error{U"left value error"};
 	}
 }
 
-r_type Interpreter::value(r_type v) {
-	if (auto p = get_if<TYPE>(&v)) {
+std::any Interpreter::value(std::any v) {
+	if (auto p = std::any_cast<int32>(&v)) {
 		return *p;
 	}
-	else if (auto p = get_if<Array<TYPE>>(&v)) {
+	else if (auto p = std::any_cast<String>(&v)) {
 		return *p;
 	}
-	else if (auto p = get_if<shared_ptr<DynamicFunc>>(&v)) {
+	else if (auto p = std::any_cast<Array<TYPE>>(&v)) {
 		return *p;
 	}
-	else if (auto p = get_if<shared_ptr<Variable>>(&v)) {
+	else if (auto p = std::any_cast<shared_ptr<DynamicFunc>>(&v)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<shared_ptr<Variable>>(&v)) {
 		return (*p)->value;
 	}
 	else {
@@ -206,60 +210,45 @@ r_type Interpreter::value(r_type v) {
 	}
 }
 
-TYPE Interpreter::checkTYPEValue(r_type v) {
-	if (auto p = get_if<TYPE>(&v)) {
+int32 Interpreter::integer(std::any v) {
+	if (auto p = std::any_cast<int32>(&v)) {
 		return *p;
 	}
-	else {
-		throw Error{U"value error"};
+	else if (auto p = std::any_cast<String>(&v)) {
+		return Parse<int32>(*p);
 	}
-}
-
-int32 Interpreter::integer(r_type v) {
-	if (auto p = get_if<TYPE>(&v)) {
-		if (auto q = get_if<int32>(p)) {
-			return *q;
-		}
-		if (auto q = get_if<String>(p)) {
-			return Parse<int32>(*q);
-		}
-		throw Error{U"right value error"};
-	}
-	else if (auto p = get_if<shared_ptr<Variable>>(&v)) {
+	else if (auto p = std::any_cast<shared_ptr<Variable>>(&v)) {
 		return integer((*p)->value);
 	}
 	throw Error{U"right value error"};
 }
 
-String Interpreter::str(r_type v) {
-	if (auto p = get_if<TYPE>(&v)) {
-		if (auto q = get_if<int32>(p)) {
-			return Format(*q);
-		}
-		if (auto q = get_if<String>(p)) {
-			return *q;
-		}
-		throw Error{U"right value error"};
+String Interpreter::str(std::any v) {
+	if (auto p = std::any_cast<int32>(&v)) {
+		return Format(*p);
 	}
-	else if (auto p = get_if<shared_ptr<Variable>>(&v)) {
+	if (auto p = std::any_cast<String>(&v)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<shared_ptr<Variable>>(&v)) {
 		return str((*p)->value);
 	}
 	throw Error{U"right value error"};
 }
 
-TYPE Interpreter::calc(shared_ptr<Token> expr) {
-	auto l = checkTYPEValue(value(expression(expr->left)));
-	auto r = checkTYPEValue(value(expression(expr->right)));
+std::any Interpreter::calc(shared_ptr<Token> expr) {
+	auto l = value(expression(expr->left));
+	auto r = value(expression(expr->right));
 
-	if (auto left = get_if<int32>(&l)) {
-		if (auto right = get_if<int32>(&r)) {
+	if (auto left = std::any_cast<int32>(&l)) {
+		if (auto right = std::any_cast<int32>(&r)) {
 			return calcInt(expr->value, *left, *right);
 		}
 	}
 	return calcString(expr->value, str(l), str(r));
 }
 
-TYPE Interpreter::calcInt(String sign, int32 left, int32 right) {
+int32 Interpreter::calcInt(String sign, int32 left, int32 right) {
 	if (sign == U"+") {
 		return left + right;
 	}
@@ -301,7 +290,7 @@ TYPE Interpreter::calcInt(String sign, int32 left, int32 right) {
 	}
 }
 
-TYPE Interpreter::calcString(String sign, String left, String right) {
+std::any Interpreter::calcString(String sign, String left, String right) {
 	if (sign == U"+") {
 		return left + right;
 	}
@@ -334,18 +323,13 @@ TYPE Interpreter::calcString(String sign, String left, String right) {
 	}
 }
 
-TYPE Interpreter::unaryCalc(shared_ptr<Token> expr) {
+std::any Interpreter::unaryCalc(shared_ptr<Token> expr) {
 	auto v = value(expression(expr->left));
-	if (auto p = get_if<TYPE>(&v)) {
-		if (auto q = get_if<int32>(p)) {
-			return unaryCalcInt(expr->value, *q);
-		}
-		else if (auto q = get_if<String>(p)) {
-			return unaryCalcString(expr->value, *q);
-		}
-		else {
-			throw Error{U"unaryCalc error"};
-		}
+	if (auto p = std::any_cast<int32>(&v)) {
+		return unaryCalcInt(expr->value, *p);
+	}
+	else if (auto p = std::any_cast<String>(&v)) {
+		return unaryCalcString(expr->value, *p);
 	}
 	else {
 		throw Error{U"unaryCalc error"};
@@ -376,23 +360,23 @@ int32 Interpreter::unaryCalcString(String sign, String left) {
 	}
 }
 
-r_type Interpreter::invoke(shared_ptr<Token> expr) {
+std::any Interpreter::invoke(shared_ptr<Token> expr) {
 	shared_ptr<Func> f = func(expression(expr->left));
-	Array<r_type> values = {};
+	Array<std::any> values = {};
 	for (auto arg : expr->params) {
 		values << value(expression(arg));
 	}
 	return f->invoke(values);
 }
 
-shared_ptr<Func> Interpreter::func(r_type v) {
-	if (auto p = get_if<shared_ptr<Func>>(&v)) {
+shared_ptr<Func> Interpreter::func(std::any v) {
+	if (auto p = std::any_cast<shared_ptr<Func>>(&v)) {
 		return *p;
 	}
-	if (auto p = get_if<shared_ptr<DynamicFunc>>(&v)) {
+	if (auto p = std::any_cast<shared_ptr<DynamicFunc>>(&v)) {
 		return *p;
 	}
-	else if (auto p = get_if<shared_ptr<Variable>>(&v)) {
+	else if (auto p = std::any_cast<shared_ptr<Variable>>(&v)) {
 		return func((*p)->value);
 	}
 	else {
@@ -400,7 +384,7 @@ shared_ptr<Func> Interpreter::func(r_type v) {
 	}
 }
 
-TYPE Interpreter::func(shared_ptr<Token> token) {
+std::any Interpreter::func(shared_ptr<Token> token) {
 	String name = token->ident->value;
 	if (local->functions.contains(name)) {
 		throw Error{U"Name was used"};
@@ -428,7 +412,7 @@ TYPE Interpreter::func(shared_ptr<Token> token) {
 	return mono{};
 }
 
-r_type Interpreter::if_(shared_ptr<Token> token, Optional<bool>& ret, Optional<bool>& brk) {
+std::any Interpreter::if_(shared_ptr<Token> token, Optional<bool>& ret, Optional<bool>& brk) {
 	Array<shared_ptr<Token>> block;
 	if (isTrue(token->left)) {
 		block = token->block;
@@ -446,31 +430,24 @@ r_type Interpreter::if_(shared_ptr<Token> token, Optional<bool>& ret, Optional<b
 }
 
 bool Interpreter::isTrue(shared_ptr<Token> token) {
-	r_type v = value(expression(token));
+	std::any v = value(expression(token));
 	bool f = false;
-	if (auto p = get_if<TYPE>(&v)) {
-		if (auto q = get_if<int32>(p)) {
-			if (*q != 0) {
-				f = true;
-			}
+	if (auto p = std::any_cast<int32>(&v)) {
+		if (*p != 0) {
+			f = true;
 		}
 	}
 	return f;
 }
 
-bool Interpreter::isTrue(r_type v) {
-	if (auto p = get_if<TYPE>(&v)) {
-		if (auto q = get_if<int32>(p)) {
-			return 0 != *q;
-		}
-		else if (auto q = get_if<String>(p)) {
-			return U"" != *q;
-		}
-		else {
-			return false;
-		}
+bool Interpreter::isTrue(std::any v) {
+	if (auto p = std::any_cast<int32>(&v)) {
+		return 0 != *p;
 	}
-	else if (auto p = get_if<shared_ptr<DynamicFunc>>(&v)) {
+	else if (auto p = std::any_cast<String>(&v)) {
+		return U"" != *p;
+	}
+	else if (auto p = std::any_cast<shared_ptr<DynamicFunc>>(&v)) {
 		return true;
 	}
 	else {
@@ -480,9 +457,9 @@ bool Interpreter::isTrue(r_type v) {
 
 int32 Interpreter::toInt(bool b) { return b ? 1 : 0; }
 
-r_type Interpreter::while_(shared_ptr<Token> token, Optional<bool>& ret) {
+std::any Interpreter::while_(shared_ptr<Token> token, Optional<bool>& ret) {
 	Optional<bool> brk = false;
-	r_type val;
+	std::any val;
 	while (isTrue(token->left)) {
 		val = process(token->block, ret, brk);
 		if (ret.has_value() && ret.value()) {
@@ -495,7 +472,7 @@ r_type Interpreter::while_(shared_ptr<Token> token, Optional<bool>& ret) {
 	return mono{};
 }
 
-r_type Interpreter::var(shared_ptr<Token> token) {
+std::any Interpreter::var(shared_ptr<Token> token) {
 	for (auto item : token->block) {
 		String name;
 		shared_ptr<Token> expr;
@@ -545,47 +522,43 @@ shared_ptr<DynamicFunc> Interpreter::fexpr(shared_ptr<Token> token) {
 	return make_shared<DynamicFunc>(func);
 }
 
-r_type Interpreter::str(shared_ptr<Token> token) {
+std::any Interpreter::str(shared_ptr<Token> token) {
 	return token->value;
 }
 
-r_type Interpreter::blank(shared_ptr<Token> token) {
+std::any Interpreter::blank(shared_ptr<Token> token) {
 	return mono{};
 }
 
-r_type Interpreter::newArray(shared_ptr<Token> expr) {
-	Array<TYPE> a = {};
+std::any Interpreter::newArray(shared_ptr<Token> expr) {
+	Array<std::any> a = {};
 	for (auto item : expr->params) {
-		a << checkTYPEValue(value(expression(item)));
+		a << value(expression(item));
 	}
 	return a;
 }
 
-r_type Interpreter::accessArray(shared_ptr<Token> expr) {
-	r_type ar = arr(expression(expr->left));
+std::any Interpreter::accessArray(shared_ptr<Token> expr) {
+	std::any ar = arr(expression(expr->left));
 	int32 index = integer(expression(expr->right));
 
-	if (auto p = get_if<Array<TYPE>>(&ar)) {
+	if (auto p = std::any_cast<Array<std::any>>(&ar)) {
 		return (*p)[index];
 	}
-	else if (auto p = get_if<TYPE>(&ar)) {
-		if (auto q = get_if<String>(p)) {
-			return String{ q->at(index) };
-		}
+	if (auto p = std::any_cast<String>(&ar)) {
+		return String{ p->at(index) };
 	}
 	throw Error{U"array access error"};
 }
 
-r_type Interpreter::arr(r_type v) {
-	if (auto p = get_if<Array<TYPE>>(&v)) {
+std::any Interpreter::arr(std::any v) {
+	if (auto p = std::any_cast<Array<std::any>>(&v)) {
 		return *p;
 	}
-	else if (auto p = get_if<TYPE>(&v)) {
-		if (auto q = get_if<String>(p)) {
-			return *q;
-		}
+	if (auto p = std::any_cast<String>(&v)) {
+		return *p;
 	}
-	else if (auto p = get_if<shared_ptr<Variable>>(&v)) {
+	else if (auto p = std::any_cast<shared_ptr<Variable>>(&v)) {
 		return arr((*p)->value);
 	}
 	throw Error{U"right value error"};
