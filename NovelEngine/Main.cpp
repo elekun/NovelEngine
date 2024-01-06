@@ -36,16 +36,10 @@ void Main() {
 	manager.init(GameScene::Initialize);
 
 	String text = U"\
-	counter = (function() {\
-		var c = 0\
-		return function() {\
-			c = c + 1\
-			return c\
-		}\
-	})()\
-	println(counter())\
-	println(counter())\
-	println(counter())\
+	var ar = [1, 2, \"aaaaa\"]\
+	println(ar)\
+	var l = length(ar[2])\
+	println(l)\
 	";
 	auto tokens = Lexer().init(text).tokenize();
 	auto blk = Parser().init(tokens).block();

@@ -1,27 +1,6 @@
 ﻿#include "stdafx.h"
 #include "Interpreter.hpp"
 
-std::any Println::invoke(Array<std::any> args) {
-	for (int32 i = 0; i < args.size(); i++) {
-		if (auto p = std::any_cast<int32>(&args[i])) {
-			Console << *p;
-		}
-		else if (auto p = std::any_cast<String>(&args[i])) {
-			Console << *p;
-		}
-		else if (auto p = std::any_cast<shared_ptr<Variable>>(&args[i])) {
-			Console << U"Variable";
-		}
-		else {
-			Console << U"Function";
-		}
-
-		if (i < args.size() - 1) {
-			Console << U" ";
-		}
-	}
-	return mono{};
-}
 
 std::any DynamicFunc::invoke(Array<std::any> args) {
 	shared_ptr<Scope> parent = context->local;
@@ -29,7 +8,7 @@ std::any DynamicFunc::invoke(Array<std::any> args) {
 	context->local->parent = parent;
 
 
-	for (auto[i, param]: Indexed(params)) {
+	for (auto [i, param] : Indexed(params)) {
 		shared_ptr<Variable> v = context->newVariable(param->value);
 		if (i < args.size()) {
 			v->value = context->value(args[i]);
@@ -45,7 +24,68 @@ std::any DynamicFunc::invoke(Array<std::any> args) {
 	return val;
 }
 
+std::any Println::invoke(Array<std::any> args) {
+	String s = U"";
+	for (int32 i = 0; i < args.size(); i++) {
+		s += getPrintString(args[i]);
+		if (i < args.size() - 1) {
+			s += U" ";
+		}
+	}
+	Console << s;
+	return mono{};
+}
 
+String Println::getPrintString(std::any arg) {
+	if (auto p = std::any_cast<int32>(&arg)) {
+		return Format(*p);
+	}
+	else if (auto p = std::any_cast<String>(&arg)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<Array<std::any>>(&arg)) {
+		String s = U"{";
+		for (int32 i = 0; i < p->size(); i++) {
+			s += getPrintString(p->at(i));
+			if (i < p->size() - 1) {
+				s += U",";
+			}
+		}
+		s += U"}";
+		return s;
+	}
+	else {
+		return U"Function";
+	}
+}
+
+std::any Size_::invoke(Array<std::any> args) {
+	if (args.size() != 1) {
+		throw Error{U"size() needs 1 argument."};
+	}
+
+	std::any arg = args[0];
+	if (auto p = std::any_cast<Array<std::any>>(&arg)) {
+		return (int32)p->size();
+	}
+	else {
+		return 1;
+	}
+}
+
+std::any Length::invoke(Array<std::any> args) {
+	if (args.size() != 1) {
+		throw Error{U"length() needs 1 argument."};
+	}
+
+	std::any arg = args[0];
+	if (auto p = std::any_cast<String>(&arg)) {
+		return (int32)p->length();
+	}
+	else {
+		throw Error{U"length() needs string argument."};
+	}
+}
 
 Interpreter& Interpreter::init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs) {
 	grobal = make_shared<Scope>(Scope{ vs });
@@ -53,7 +93,9 @@ Interpreter& Interpreter::init(Array<shared_ptr<Token>> b, HashTable<String, sha
 	body = b;
 
 	Array<shared_ptr<Func>> tmp_func = {
-		make_shared<Println>(Println())
+		make_shared<Println>(Println()),
+		make_shared<Size_>(Size_()),
+		make_shared<Length>(Length())
 	};
 	for (auto f : tmp_func) {
 		grobal->functions.emplace(f->name, f);
@@ -196,14 +238,17 @@ std::any Interpreter::value(std::any v) {
 	else if (auto p = std::any_cast<String>(&v)) {
 		return *p;
 	}
-	else if (auto p = std::any_cast<Array<TYPE>>(&v)) {
-		return *p;
-	}
-	else if (auto p = std::any_cast<shared_ptr<DynamicFunc>>(&v)) {
+	else if (auto p = std::any_cast<Array<std::any>>(&v)) {
 		return *p;
 	}
 	else if (auto p = std::any_cast<shared_ptr<Variable>>(&v)) {
 		return (*p)->value;
+	}
+	else if (auto p = std::any_cast<shared_ptr<DynamicFunc>>(&v)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<mono>(&v)) {
+		return *p;
 	}
 	else {
 		throw Error{U"right value error"};
@@ -563,5 +608,3 @@ std::any Interpreter::arr(std::any v) {
 	}
 	throw Error{U"right value error"};
 }
-
-

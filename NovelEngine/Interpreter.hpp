@@ -11,9 +11,6 @@ class DynamicFunc;
 
 using namespace std;
 
-//using std::any = variant<shared_ptr<Variable>, shared_ptr<Func>, shared_ptr<DynamicFunc>, TYPE, Array<TYPE>>;
-
-// Ident definition
 
 class Variable {
 public:
@@ -59,6 +56,19 @@ public:
 class Println : public Func {
 public:
 	Println() : Func(U"println") {};
+	std::any invoke(Array<std::any> args) override;
+	String getPrintString(std::any arg);
+};
+
+class Size_ : public Func {
+public:
+	Size_() : Func(U"size") {};
+	std::any invoke(Array<std::any> args) override;
+};
+
+class Length : public Func {
+public:
+	Length() : Func(U"length") {};
 	std::any invoke(Array<std::any> args) override;
 };
 
