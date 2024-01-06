@@ -5,6 +5,9 @@
 using namespace ElephantLib;
 
 Test2::Test2(const InitData& init) : IScene{ init } {
+
+	Console << U"script path :" << getData().scriptPath;
+
 	effectIndex = 0;
 	renderTexture = MSRenderTexture{ Scene::Size() };
 
@@ -14,9 +17,11 @@ Test2::Test2(const InitData& init) : IScene{ init } {
 	if (!reader) {
 		throw Error{ U"Failed to open `{}`"_fmt(getData().scriptPath) };
 	}
+
 	scriptLines = reader.readLines();
 	scriptIndex = 0;
 	forSaveIndex = 0;
+	readStopFlag = false;
 
 	strIndex = 0;
 	indexCT = 0.05;
@@ -46,6 +51,9 @@ v_type Test2::stringToVariable(String type, String v) {
 	else if (type == U"bool") {
 		value = v.isEmpty() ? false : Parse<bool>(v);
 	}
+	else if (type == U"point") {
+		value = v.isEmpty() ? Point::Zero() : Parse<Point>(v);
+	}
 	else if (type == U"string") {
 		value = v;
 	}
@@ -73,82 +81,6 @@ Array<String> Test2::splitArgs(String s) {
 	if (s == U"") {
 		return {};
 	}
-
-	// 変数の置換
-	// 置換についてはString型だとやりにくいためstd::stringに変換して、std::regexで行う
-
-	std::smatch m;
-	std::string nar = s.narrow();
-
-	// 配列も受け取るように
-	// "<([^<>]+)>(|\[\d+\])"
-	// "(<([^<>]+)>|<([^<>]+)(\[\d+\])>)"
-	while (std::regex_search(nar, m, std::regex("<([^<>]+|)>"))) {
-		int32 index = 0;
-		if (m.size() == 4) {
-			index = Parse<int32>(Unicode::Widen(m[2].str()));
-		}
-		std::string b = m[0].str();
-		v_type var = variable[VariableKey{Unicode::Widen(m[1].str()), index}];
-		std::string v = std::visit([](const auto& x) { return Format(x).narrow(); }, var);
-		std::string new_string = std::regex_replace(nar, std::regex(b), v);
-		nar = new_string;
-	}
-	s = Unicode::Widen(nar);
-
-	// 各変数ごとに分割
-	Array<String> args = {};
-	Array<char32> bracket = {};
-	char32 quote = U' '; // " or ' or `
-	String tmp = U"";
-	for (auto i : step(s.length())) {
-		char32 c = s.at(i);
-
-		for (auto q : { U'\'', U'"', U'`' }) {
-			if (c == q) {
-				if (quote == U' ') {
-					quote = c;
-				}
-				else if (quote == q) {
-					quote = U' ';
-				}
-			}
-		}
-
-		if (c == U'(' || c == U'{') {
-			bracket << c;
-		}
-		if (c == U')' && U'(' == bracket.back()) {
-			bracket.pop_back();
-		}
-		if (c == U'}' && U'{' == bracket.back()) {
-			bracket.pop_back();
-		}
-
-		if (bracket.isEmpty() && quote == U' ' && c == U',') {
-			args << tmp;
-			tmp = U"";
-		}
-		else {
-			tmp << c;
-		}
-	}
-	args << tmp;
-
-	return args;
-}
-
-
-Array<String> Test2::splitArgs(String s) {
-	if (s == U"") {
-		return {};
-	}
-
-	// 変数の置換
-	// 置換についてはString型だとやりにくいためstd::stringに変換して、std::regexで行う
-
-	std::smatch m;
-	std::string nar = s.narrow();
 
 	// 各変数ごとに分割
 	Array<String> args = {};
@@ -193,19 +125,34 @@ Array<String> Test2::splitArgs(String s) {
 }
 
 template<typename T>
-inline void Test2::setVariable(T& v, String s) {
-	v = Parse<T>(s);
-}
-template<>
-inline void Test2::setVariable(String& v, String s) {
-	if (s.front() == '"' && s.back() == '"') {
-		s.pop_front();
-		s.pop_back();
-		v = s;
+inline void Test2::setArgument(StringView op, StringView option, T& v, v_type arg) {
+	if (auto p = std::get_if<T>(&arg)) {
+		v = *p;
 	}
 	else {
-		assert(true);
+		ThrowArgumentError(op, option, Unicode::Widen(typeid(T).name()), arg);
 	}
+}
+
+template<typename T>
+inline void Test2::setArgumentParse(StringView op, StringView option, T& v, v_type arg) {
+	Optional<T> o = std::visit([](auto& x) {
+		return ParseOpt<T>(Format(x));
+	}, arg);
+
+	if (o) {
+		v = *o;
+	}
+	else {
+		ThrowParseError(Unicode::Widen(typeid(T).name()), arg);
+	}
+}
+
+template<>
+inline void Test2::setArgumentParse(StringView op, StringView option, String& v, v_type arg) {
+	v = std::visit([](auto& x) {
+		return Format(x);
+	}, arg);
 }
 
 void Test2::readSetting() {
@@ -251,6 +198,8 @@ void Test2::readSetting() {
 
 void Test2::readScriptLine(String& s) {
 	if (scriptIndex >= scriptLines.size()) {
+		s = U"";
+		readStopFlag = true;
 		return;
 	}
 	s = scriptLines.at(scriptIndex);
@@ -259,69 +208,130 @@ void Test2::readScriptLine(String& s) {
 
 void Test2::readScript() {
 	String line;
-	bool readStopFlag = false;
+	readStopFlag = false;
 
-	// 引数の処理
 	auto getArgs = [&, this](StringView sv) {
-		// const auto tmp = String{ sv }.split(',');
-		// カンマ区切りのデータ型(Pointなど)が混じってても問題なく分割できるように設計
-		Array<String> args = {}; // 引き渡された変数
-		for (auto i : splitArgs(String{ sv })) {
-			args << eraseFrontBackChar(i, U' '); //前後のスペースを削除
-		}
-		return args;
-	};
-
-	auto _getArgs = [&, this](StringView sv) {
 		Array<std::pair<String, v_type>> args = {}; // 引き渡された変数
 		for (auto i : splitArgs(String{ sv })) {
 			String s = eraseFrontBackChar(i, U' '); //前後のスペースを削除
-			auto r = RegExp(U"([0-9a-zA-Z_]+) *= *(.+)").search(s);
+			auto r = RegExp(U"([0-9a-zA-Z_]+) *= *(.+)").match(s);
 			String optionName{ r[1].value() };
 			String optionArg{ r[2].value() };
 
-			args << std::make_pair(optionName, optionArg);
+			v_type value;
+
+			// variable or not
+			if (auto mr = RegExp(U"<([0-9a-zA-Z_]+)>").match(optionArg)) {
+				value = variable[VariableKey{String{mr[1].value()}, 0}];
+				args << std::make_pair(optionName, value);
+				continue;
+			}
+
+			// string or not
+			Array<char32> _q = { U'\'', U'"', U'`' };
+			if (auto mr = RegExp(U"\"(.*)\"|'(.*)'|`(.*)`").match(optionArg)) {
+				value = String{ mr[1].value() };
+				args << std::make_pair(optionName, value);
+				continue;
+			}
+
+			// point or not
+			if (auto mr = RegExp(U"\\( *(.+), *(.+) *\\)").match(optionArg)) {
+				Array<int32> tmp = {};
+				for (int32 i = 1; i < mr.size(); i++) {
+					String tmp_s{ mr[i].value() };
+					if (auto mr2 = RegExp(U"<([0-9a-zA-Z_]+)>").match(tmp_s)) {
+						v_type _v = variable[VariableKey{String{mr2[1].value()}, 0}];
+						if (auto p = std::get_if<int32>(&_v)) {
+							tmp << *p;
+						}
+						else {
+							throw Error{U"Value Error : point型の要素にはint型しか用いることができません"};
+						}
+					}
+					else {
+						if (auto e = ParseOpt<int32>(tmp_s)) {
+							tmp << *e;
+						}
+						else {
+							throw Error{U"Value Error : point型の要素にはint型しか用いることができません"};
+						}
+					}
+				}
+				if (tmp.size() == 2) {
+					value = Point{ tmp[0], tmp[1] };
+					args << std::make_pair(optionName, value);
+				}
+				else {
+					throw Error{U"Value Error : point型の構成でエラーが起きました"};
+				}
+				continue;
+			}
+
+			// bool or not
+			if (RegExp(U"true|false").fullMatch(optionArg)) {
+				value = Parse<bool>(optionArg);
+				args << std::make_pair(optionName, value);
+				continue;
+			}
+
+			// double or not
+			if (RegExp(U"[+,-]?([1-9]\\d*|0)\\.\\d+").fullMatch(optionArg)) {
+				value = Parse<double>(optionArg);
+				args << std::make_pair(optionName, value);
+				continue;
+			}
+
+			// int or not
+			if (RegExp(U"[+,-]?([1-9]\\d*|0)").fullMatch(optionArg)) {
+				value = Parse<int32>(optionArg);
+				args << std::make_pair(optionName, value);
+				continue;
+			}
+
+			throw Error{U"{} は値として不適切です"_fmt(optionArg)};
 		}
+
 		return args;
 	};
-
-	// オプション引数の処理
-	auto getOption = [](String o) {
-		auto option = RegExp(U"(.+) *= *(.+)").search(o);
-		String optionName{ option[1].value() };
-		String optionArg{ option[2].value() };
-		return std::make_pair(optionName, optionArg);
-	};
-
 
 	auto setMainProcess = [&, this](std::function<bool()> f) {
 		mainProcess = f;
 		readStopFlag = true;
 	};
 
+	// 命令
+	Array<String> pn = {
+		U"setting", U"start", U"name",
+		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
+		U"music", U"sound",
+		U"wait", U"goto", U"scenechange", U"call", U"exit"
+	};
+	String proc = U"";
+	for (auto [j, p] : Indexed(pn)) {
+		proc += p;
+		if (j != pn.size() - 1) { proc += U"|"; }
+	}
+
 	// 文章を読み込む処理
 	do {
 		// 各種処理
 		if (operateLine != U"") {
-			Array<String> pn = {
-				U"setting", U"start", U"name",
-				U"setimg", U"setbtn", U"change", U"move", U"delete",
-				U"music", U"sound",
-				U"wait", U"goto", U"scenechange", U"call", U"exit"
-			};
-			String proc = U"";
-			for (auto [j, p] : Indexed(pn)) {
-				proc += p;
-				if (j != pn.size() - 1) { proc += U"|"; }
-			}
 
 			const auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).search(operateLine);
 			if (!operate.isEmpty()) {
 
 				StringView op =	operate[1].value(); // 処理のタグ
-				Array<String> args = getArgs(operate[2].value());
+				Array<std::pair<String, v_type>> args = getArgs(operate[2].value());
+
 				if (op == U"setting") {
-					FilePath fp = args.at(0); //設定ファイルのパス
+					FilePath fp = U""; //設定ファイルのパス
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
+					}
+
 					std::function<bool()> f = [&, this, p = fp]() {
 						settingfile = p;
 						readSetting();
@@ -334,10 +344,10 @@ void Test2::readScript() {
 					// ...option
 					double d = 0.0;
 
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
+					for (auto [option, arg] : args) {
 						if (option == U"duration") {
-							d = Parse<double>(arg);
+							setArgumentParse(op, option, d, arg);
+							d = Max(d, 0.0);
 						}
 					}
 
@@ -379,7 +389,13 @@ void Test2::readScript() {
 
 				if (op == U"name") {
 					// newName
-					String name = args.isEmpty() ? U"" : args.at(0);
+					String name = U"";
+					for (auto [option, arg] : args) {
+						if (option == U"name") {
+							setArgument(op, option, name, arg);
+						}
+					}
+
 					std::function<bool()> f = [&, this, n = name]() {
 						nowName = n;
 						return true;
@@ -390,36 +406,36 @@ void Test2::readScript() {
 				if (op == U"setimg") {
 					String n = U""; // タグの名前
 					FilePath fp = U"";
-					Vec2 p = Vec2::Zero();
+					Point p = Point::Zero();
 					int32 l = 0;
 					Size si = Size::Zero();
 
 					double fa = 0; // フェードインにかかる時間
 					double s = 1.0;
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
+
+					for (auto [option, arg] : args) {
 						if (option == U"tag") {
-							setVariable(n, arg);
-						}
-						if (option == U"pos") {
-							setVariable(p, arg);
+							setArgument(op, option, n, arg);
 						}
 						if (option == U"path") {
-							setVariable(fp, arg);
+							setArgument(op, option, fp, arg);
+						}
+						if (option == U"pos") {
+							setArgument(op, option, p, arg);
 						}
 						if (option == U"fade") {
-							setVariable(fa, arg);
+							setArgumentParse(op, option, fa, arg);
 							fa = Max(fa, 0.0);
 						}
 						if (option == U"size") {
-							setVariable(si, arg);
+							setArgument(op, option, si, arg);
 						}
 						if (option == U"scale") {
-							setVariable(s, arg);
+							setArgumentParse(op, option, s, arg);
 							s = Max(s, 0.0);
 						}
 						if (option == U"layer") {
-							setVariable(l, arg);
+							setArgument(op, option, l, arg);
 						}
 					}
 
@@ -456,43 +472,46 @@ void Test2::readScript() {
 				if (op == U"setbtn") {
 					String n = U"";
 					FilePath nor = U"", hov = U"", cli = U"";
-					Vec2 p = Vec2::Zero();
+					Point p = Point::Zero();
 					int32 l = 0;
 					Size si = Size::Zero();
 					String e = U"";
 
 					double fa = 0; // フェードインにかかる時間
 					double s = 1.0;
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
-						if (option == U"pos") {
-							setVariable(p, arg);
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
 						}
 						if (option == U"path" || option == U"normal") {
-							setVariable(nor, arg);
+							setArgument(op, option, nor, arg);
 						}
 						if (option == U"hover") {
-							setVariable(hov, arg);
+							setArgument(op, option, hov, arg);
 						}
 						if (option == U"click") {
-							setVariable(cli, arg);
+							setArgument(op, option, cli, arg);
+						}
+						if (option == U"pos") {
+							setArgument(op, option, p, arg);
 						}
 						if (option == U"fade") {
-							setVariable(fa, arg);
+							setArgumentParse(op, option, fa, arg);
 							fa = Max(fa, 0.0);
 						}
 						if (option == U"size") {
-							setVariable(si, arg);
-						}
-						if (option == U"scale") {
-							setVariable(s, arg);
+							setArgument(op, option, si, arg);
 							s = Max(s, 0.0);
 						}
+						if (option == U"scale") {
+							setArgumentParse(op, option, s, arg);
+						}
 						if (option == U"layer") {
-							setVariable(l, arg);
+							setArgument(op, option, l, arg);
 						}
 						if (option == U"exp") {
-							setVariable(e, arg);
+							setArgument(op, option, e, arg);
 						}
 					}
 
@@ -531,16 +550,16 @@ void Test2::readScript() {
 					FilePath fp;
 					double fa = 0.0;
 
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
+					for (auto [option, arg] : args) {
 						if (option == U"tag") {
-							setVariable(n, arg);
+							setArgument(op, option, n, arg);
 						}
 						if (option == U"path") {
-							fp = arg;
+							setArgument(op, option, fp, arg);
 						}
 						if (option == U"fade") {
-							fa = Max(Parse<double>(arg), 0.0);
+							setArgumentParse(op, option, fa, arg);
+							fa = Max(fa, 0.0);
 						}
 					}
 
@@ -579,44 +598,104 @@ void Test2::readScript() {
 					subProcesses.emplace_back(f());
 				}
 
-				if (op == U"move") {
+				if (op == U"moveto") {
 					// x, y, duration, tag, ...option
-					Point v{ Parse<int32>(args.at(0)), Parse<int32>(args.at(1)) };
-					double dur = Parse<double>(args.at(2));
-					String ta = args.at(3);
 
-					args.pop_front_N(4);
-					int32 ty = 1; // 移動タイプ ( 1(default): 移動先指定, 2: 移動量指定 )
+					String n; // タグの名前
+					Point d;
+					double dur;
 					double del = 0; // 開始時間のディレイ
-					for (auto o : args) {
-						auto [option, arg] = getOption(o);
 
-						if (option == U"type") {
-							ty = Max(Parse<int32>(arg), 1);
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+						if (option == U"dst") {
+							setArgument(op, option, d, arg);
+						}
+						if (option == U"duration") {
+							setArgumentParse(op, option, dur, arg);
 						}
 						if (option == U"delay") {
-							double _ = Parse<double>(arg);
-							del = _ > 0 ? _ : 0;
+							setArgumentParse(op, option, del, arg);
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _v = v, _dur = dur, _ta = ta, _ty = ty, _del = del]() {
+					std::function<std::function<bool()>()> f = [&, this, _ta = n, _dst = d, _dur = dur, _del = del]() {
 						double time = 0.0;
 						Vec2 src, dst;
 
 						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
 							if ((*itr)->getTag() == _ta) {
 								src = (*itr)->getPosition();
-								if (_ty == 1) {
-									dst = _v;
-								}
-								if (_ty == 2) {
-									dst = src + _v;
-								}
+								dst = _dst;
+								// dst = src + _v;
 							}
 						}
 
-						return [&, this, time, src, dst, duration = _dur, tag = _ta, type = _ty, delay = _del]() mutable {
+						return [&, this, time, src, dst, duration = _dur, tag = _ta, delay = _del]() mutable {
+							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
+									double t = duration > 0 ? Clamp((time - delay) / duration, 0.0, 1.0) : 1.0;
+									(*itr)->setPosition(src.lerp(dst, t));
+
+									if (proceedInput.down()) {
+										(*itr)->setPosition(dst);
+										return true;
+									}
+								}
+							}
+
+							time += Scene::DeltaTime();
+
+							if (time < delay) {
+								return false;
+							}
+							else if (time > delay + duration) {
+								return true;
+							}
+
+							return false;
+						};
+					};
+					subProcesses.emplace_back(f());
+				}
+
+				if (op == U"moveby") {
+					// x, y, duration, tag, ...option
+
+					String n; // タグの名前
+					Point by;
+					double dur;
+					double del = 0; // 開始時間のディレイ
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+						if (option == U"by") {
+							setArgument(op, option, by, arg);
+						}
+						if (option == U"duration") {
+							setArgumentParse(op, option, dur, arg);
+						}
+						if (option == U"delay") {
+							setArgumentParse(op, option, del, arg);
+						}
+					}
+
+					std::function<std::function<bool()>()> f = [&, this, _ta = n, _by = by, _dur = dur, _del = del]() {
+						double time = 0.0;
+						Vec2 src, dst;
+
+						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							if ((*itr)->getTag() == _ta) {
+								src = (*itr)->getPosition();
+								dst = src + _by;
+							}
+						}
+
+						return [&, this, time, src, dst, duration = _dur, tag = _ta, delay = _del]() mutable {
 							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = duration > 0 ? Clamp((time - delay) / duration, 0.0, 1.0) : 1.0;
@@ -647,15 +726,15 @@ void Test2::readScript() {
 				if (op == U"delete") {
 					// tag, ...option
 					String n; // タグの名前
-
 					double fa = 0; // フェードアウトにかかる時間
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
+
+					for (auto [option, arg] : args) {
 						if (option == U"tag") {
-							setVariable(n, arg);
+							setArgument(op, option, n, arg);
 						}
 						if (option == U"fade") {
-							fa = Max(Parse<double>(arg), 0.0);
+							setArgumentParse(op, option, fa, arg);
+							fa = Max(fa, 0.0);
 						}
 					}
 
@@ -693,7 +772,14 @@ void Test2::readScript() {
 
 				if (op == U"music") {
 					//filepath, ...option
-					Audio a{ Audio::Stream, args.at(0) };
+					FilePath fp;
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
+					}
+					Audio a{ Audio::Stream, fp };
+
 					std::function<std::function<bool()>()> f = [&, this, _a = a]() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
@@ -707,7 +793,14 @@ void Test2::readScript() {
 
 				if (op == U"sound") {
 					//filepath, ...option
-					Audio a{ Audio::Stream, args.at(0) };
+					FilePath fp;
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
+					}
+					Audio a{ Audio::Stream, fp };
+
 					std::function<std::function<bool()>()> f = [&, this, _a = a]() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
@@ -721,7 +814,13 @@ void Test2::readScript() {
 
 				if (op == U"wait") {
 					// duration
-					double d = Parse<double>(args.at(0));
+					double d = 0.0;
+					for (auto [option, arg] : args) {
+						if (option == U"duration") {
+							setArgumentParse(op, option, d, arg);
+						}
+					}
+
 					std::function<std::function<bool()>()> f = [&, this, _d = d]() {
 						double time = 0.0;
 						return [&, this, time, duration = _d]() mutable {
@@ -739,7 +838,13 @@ void Test2::readScript() {
 
 				if (op == U"goto") {
 					// distination
-					String d = args.at(0);
+					String d;
+					for (auto [option, arg] : args) {
+						if (option == U"dst") {
+							setArgument(op, option, d, arg);
+						}
+					}
+
 					std::function<bool()> f = [&, this, dst = d]() {
 						for (auto [i, l] : Indexed(scriptLines)) {
 							const auto skip = RegExp(U"@(.+)").search(l);
@@ -753,25 +858,25 @@ void Test2::readScript() {
 						return true;
 					};
 
-
 					setMainProcess(f);
 				}
 
 				if (op == U"scenechange") {
 					// filename
-					String fi = args.at(0);
-					args.pop_front_N(1);
-
-					double d = 1.0; // シーン切り替えににかかる時間
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
+					FilePath fp;
+					double d; // シーン切り替えににかかる時間
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
 						if (option == U"duration") {
-							d = Max(Parse<double>(arg), 0.0);
+							setArgumentParse(op, option, d, arg);
+							d = Max(d, 0.0);
 						}
 					}
 
-					std::function<bool()> f = [&, this, file = fi, dur = d]() {
-						getData().scriptPath = U"assets/script/{}.es"_fmt(file);
+					std::function<bool()> f = [&, this, file = fp, dur = d]() {
+						getData().scriptPath = file;
 						changeScene(GameScene::Test2, dur * 1.0s);
 						return true;
 					};
@@ -786,14 +891,14 @@ void Test2::readScript() {
 				*/
 				if (op == U"call") {
 					// filename
-					String fi = args.at(0);
-					args.pop_front_N(1);
-
-					for (auto op : args) {
-						auto [option, arg] = getOption(op);
+					FilePath fp;
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
 					}
 
-					std::function<bool()> f = [&, this, file = fi]() {
+					std::function<bool()> f = [&, this, file = fp]() {
 						readScript();
 						return true;
 					};
@@ -913,37 +1018,43 @@ void Test2::readScript() {
 			if (!select.isEmpty()) {
 				// 選択肢を読み込んだら選択肢リストに追加
 				String text{ select[1].value() };
-				Array<String> args = getArgs(select[2].value());
-				String dst{ args.at(0) };
-				String type{ args.at(1) };
+				Array<std::pair<String, v_type>> args = getArgs(select[2].value());
+
+				String dst;
+				String type;
 				Point pos = Point{ 0, 0 };
 				Point size = Point{ 0, 0 };
 				String normal = U"", hover = U"", click = U"";
-				args.pop_front_N(2);
 
 				// 引数を処理
-				for (auto op : args) {
-					auto [option, arg] = getOption(op);
-					if (type == U"image") {
-						if (option == U"pos") {
-							pos = Parse<Point>(arg);
-						}
-						if (option == U"size") {
-							size = Parse<Point>(arg);
-						}
-						if (option == U"normal") {
-							normal = arg;
-						}
-						if (option == U"hover") {
-							hover = arg;
-						}
-						if (option == U"click") {
-							click = arg;
-						}
+				for (auto [option, arg] : args) {
+					if (option == U"dst") {
+						setArgument(U"choice", option, dst, arg);
 					}
+					if (option == U"type") {
+						setArgument(U"choice", option, type, arg);
+					}
+					if (option == U"pos") {
+						setArgument(U"choice", option, pos, arg);
+					}
+					if (option == U"size") {
+						setArgument(U"choice", option, size, arg);
+					}
+					if (option == U"normal") {
+						setArgument(U"choice", option, normal, arg);
+					}
+					if (option == U"hover") {
+						setArgument(U"choice", option, hover, arg);
+					}
+					if (option == U"click") {
+						setArgument(U"choice", option, click, arg);
+					}
+
 				}
 
-				selections.emplace_back(Choice{ text, dst, type, pos, size, normal, hover, click });
+				if (type == U"image") {
+					selections.emplace_back(Choice{ text, dst, type, pos, size, normal, hover, click });
+				}
 
 				isShowSelection = false;
 			}
@@ -952,6 +1063,7 @@ void Test2::readScript() {
 				nowSentence += line + U"\n";
 			}
 		}
+
 	} while (!readStopFlag);
 
 
@@ -1024,7 +1136,7 @@ void Test2::analyzeCode(String code){
 		}
 	}
 
-	Array<String> var_type = { U"int", U"double", U"string", U"bool"};
+	Array<String> var_type = { U"int", U"double", U"string", U"bool", U"point"};
 	String vl = U"";
 	for (auto [j, p] : Indexed(var_type)) {
 		vl += p;
@@ -1035,11 +1147,12 @@ void Test2::analyzeCode(String code){
 		String exp = eraseFrontBackChar(exps.at(i), U' ');
 
 		/*
+		* 変数宣言＆初期化
 		* grobal int x = 32;
 		* string s = "test";
 		* grobal double array[3] = {1.0, 2.0, 3.0};
 		*/
-		String re = U"(|grobal +)({}) +(\\w+)(|\\[\\d+\\]) += +(.+)"_fmt(vl);
+		String re = U"(|grobal +)({}) +([a-zA-Z_]\\w*)(|\\[\\d+\\]) += +(.+)"_fmt(vl);
 		if (RegExp(re).fullMatch(exp)) {
 			auto t = RegExp(re).match(exp);
 			if (t.size() != 6) {
@@ -1111,28 +1224,10 @@ void Test2::analyzeCode(String code){
 			}
 			else {
 				auto key = VariableKey{ var, 0 };
-				Console << U"{} {} = {};"_fmt(type, key.name, value);
 				setVariable(isGrobal, key, type, value);
 			}
 		}
 	}
-
-	Console << U"-------------";
-	Console << U"Variable";
-	for (auto [k, v] : variable) {
-		v_type _v = testReturn(v);
-		std::visit([k = k](auto& x) {
-			Console << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
-		}, _v);
-	}
-	Console << U"\n";
-	Console << U"Grobal Variable";
-	for (auto [k, v] : getData().grobalVariable) {
-		std::visit([k = k](auto& x) {
-			Console << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
-		}, v);
-	}
-	Console << U"-------------";
 }
 
 void Test2::resetTextWindow(Array<String> strs) {
@@ -1183,7 +1278,7 @@ void Test2::update() {
 		}
 	}
 
-	//
+	// 画像系の逐次処理
 	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
 		(*itr)->update();
 	}
@@ -1216,7 +1311,38 @@ void Test2::update() {
 
 		writer(forSaveGraphics); //画像をシリアライズして保存はできないので、画像そのものではなく画像情報を保存
 
-		//writer(variable);
+		// 変数書き込み
+		Array<VariableKey> k_tmp;
+		Array<v_type> v_tmp;
+		Array<String> t_tmp;
+		for (auto [k, v] : variable) {
+			k_tmp << k;
+			v_tmp << v;
+			if (auto* p = std::get_if<int32>(&v)) {
+				t_tmp << U"int";
+			}
+			else if (auto* p = std::get_if<String>(&v)) {
+				t_tmp << U"string";
+			}
+			else if (auto* p = std::get_if<double>(&v)) {
+				t_tmp << U"double";
+			}
+			else if (auto* p = std::get_if<bool>(&v)) {
+				t_tmp << U"bool";
+			}
+			else if (auto* p = std::get_if<Point>(&v)) {
+				t_tmp << U"point";
+			}
+		}
+
+		writer(t_tmp); //保存する変数の型のリスト
+		for (auto i : step(k_tmp.size())) {
+			writer(k_tmp[i]); // 変数名
+			std::visit([&writer](auto& x) {
+				writer(x); // 値
+			}, v_tmp[i]);
+		}
+		// -------
 
 		Print << U"Saved!";
 	}
@@ -1231,6 +1357,7 @@ void Test2::update() {
 		reader(nowName);
 
 		reader(forSaveGraphics); //画像情報をロード
+		graphics.clear();
 		for (auto itr = forSaveGraphics.begin(); itr != forSaveGraphics.end(); ++itr) {
 			graphics << std::make_shared<Graphic>(*itr);
 		}
@@ -1239,7 +1366,42 @@ void Test2::update() {
 			(*itr)->setTexture();
 		}
 
-		//reader(variable);
+		variable.clear();
+		Array<String> typeList;
+		reader(typeList); //変数リスト
+		for (String t : typeList) {
+			VariableKey k;
+			v_type v;
+
+			reader(k);
+			if (t == U"int") {
+				int32 _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"string") {
+				String _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"bool") {
+				bool _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"double") {
+				double _;
+				reader(_);
+				v = _;
+			}
+			else if (t == U"point") {
+				Point _;
+				reader(_);
+				v = _;
+			}
+
+			variable[k] = v;
+		}
 
 		// 実行中の各種処理を初期化
 		resetTextWindow({});
@@ -1272,18 +1434,22 @@ void Test2::draw() const {
 	}
 
 	if (isShowingVariable) {
-		/*
+		Print << U"-------------";
 		Print << U"Variable";
 		for (auto [k, v] : variable) {
-			Print << U"{} {}[{}] : {}"_fmt(v.type, k.name, k.index, v.value);
+			std::visit([k = k](auto& x) {
+				Print << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
+			}, v);
 		}
-		Print << U"";
+		Print << U"\n";
 		Print << U"Grobal Variable";
-		for (auto[k, v] : getData().grobalVariable) {
-			Print << U"{} {}[{}] : {}"_fmt(v.type, k.name, k.index, v.value);
+		for (auto [k, v] : getData().grobalVariable) {
+			std::visit([k = k](auto& x) {
+				Print << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
+			}, v);
 		}
+		Print << U"-------------";
 		return;
-		*/
 	}
 
 	/*
