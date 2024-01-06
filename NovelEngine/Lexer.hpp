@@ -20,7 +20,7 @@ private:
 	char32 next(); //見ている文字を返して次に行く
 	void skipSpace(); //スペースを飛ばす
 	bool isSignStart(char32 c);
-	bool isDigitStart(char32 c);
+	bool isNumberStart(char32 c);
 	bool isIdentStart(char32 c);
 	bool isParenStart(char32 c);
 	bool isCurlyStart(char32 c);
@@ -28,7 +28,7 @@ private:
 	bool isStringStart(char32 c);
 	bool isBracketStart(char32 c);
 	shared_ptr<Token> sign();
-	shared_ptr<Token> digit();
+	shared_ptr<Token> number();
 	shared_ptr<Token> ident();
 	shared_ptr<Token> paren();
 	shared_ptr<Token> curly();

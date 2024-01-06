@@ -97,6 +97,7 @@ public:
 	std::any process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk);
 	std::any expression(shared_ptr<Token> expr);
 	int32 digit(shared_ptr<Token> token);
+	double decimal(shared_ptr<Token> token);
 	std::any ident(shared_ptr<Token> token);
 	shared_ptr<Variable> assign(shared_ptr<Token> expr);
 	shared_ptr<Variable> variable(std::any value);
@@ -105,9 +106,11 @@ public:
 	String str(std::any v);
 	std::any calc(shared_ptr<Token> expr);
 	int32 calcInt(String sign, int32 left, int32 right);
+	std::any calcDecimal(String sign, double left, double right);
 	std::any calcString(String sign, String left, String right);
 	std::any unaryCalc(shared_ptr<Token> expr);
 	int32 unaryCalcInt(String sign, int32 left);
+	double unaryCalcDecimal(String sign, double left);
 	int32 unaryCalcString(String sign, String left);
 	std::any invoke(shared_ptr<Token> expr);
 	shared_ptr<Func> func(std::any v);

@@ -40,6 +40,9 @@ String Println::getPrintString(std::any arg) {
 	if (auto p = std::any_cast<int32>(&arg)) {
 		return Format(*p);
 	}
+	else if (auto p = std::any_cast<double>(&arg)) {
+		return Format(*p);
+	}
 	else if (auto p = std::any_cast<String>(&arg)) {
 		return *p;
 	}
@@ -156,13 +159,16 @@ std::any Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, O
 
 std::any Interpreter::expression(shared_ptr<Token> expr) {
 	if (expr->kind == U"digit") {
-		return digit(expr); // return TYPE
+		return digit(expr);
+	}
+	if (expr->kind == U"decimal") {
+		return decimal(expr);
 	}
 	else if (expr->kind == U"string") {
 		return str(expr);
 	}
 	else if (expr->kind == U"ident") {
-		return ident(expr); // return Variable or Func
+		return ident(expr);
 	}
 	else if (expr->kind == U"blank") {
 		return blank(expr);
@@ -174,22 +180,22 @@ std::any Interpreter::expression(shared_ptr<Token> expr) {
 		return accessArray(expr);
 	}
 	else if (expr->kind == U"func") {
-		return func(expr); // return nullptr?
+		return func(expr);
 	}
 	else if (expr->kind == U"fexpr") {
 		return fexpr(expr);
 	}
 	else if (expr->kind == U"paren") {
-		return invoke(expr); // return function_return(TYPE)
+		return invoke(expr);
 	}
 	else if (expr->kind == U"sign" && expr->value == U"=") {
-		return assign(expr); // return Variable
+		return assign(expr);
 	}
 	else if (expr->kind == U"unary") {
-		return unaryCalc(expr); // return TYPE
+		return unaryCalc(expr);
 	}
 	else if (expr->kind == U"sign") {
-		return calc(expr); // return TYPE
+		return calc(expr);
 	}
 	else {
 		throw Error{U"Expression error"};
@@ -198,6 +204,10 @@ std::any Interpreter::expression(shared_ptr<Token> expr) {
 
 int32 Interpreter::digit(shared_ptr<Token> token) {
 	return Parse<int32>(token->value);
+}
+
+double Interpreter::decimal(shared_ptr<Token> token) {
+	return Parse<double>(token->value);
 }
 
 std::any Interpreter::ident(shared_ptr<Token> token) {
@@ -233,6 +243,9 @@ shared_ptr<Variable> Interpreter::variable(std::any value) {
 
 std::any Interpreter::value(std::any v) {
 	if (auto p = std::any_cast<int32>(&v)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<double>(&v)) {
 		return *p;
 	}
 	else if (auto p = std::any_cast<String>(&v)) {
@@ -272,6 +285,9 @@ String Interpreter::str(std::any v) {
 	if (auto p = std::any_cast<int32>(&v)) {
 		return Format(*p);
 	}
+	if (auto p = std::any_cast<double>(&v)) {
+		return Format(*p);
+	}
 	if (auto p = std::any_cast<String>(&v)) {
 		return *p;
 	}
@@ -289,7 +305,19 @@ std::any Interpreter::calc(shared_ptr<Token> expr) {
 		if (auto right = std::any_cast<int32>(&r)) {
 			return calcInt(expr->value, *left, *right);
 		}
+		else if (auto right = std::any_cast<double>(&r)) {
+			return calcDecimal(expr->value, *left, *right);
+		}
 	}
+	else if (auto left = std::any_cast<double>(&l)) {
+		if (auto right = std::any_cast<int32>(&r)) {
+			return calcDecimal(expr->value, *left, *right);
+		}
+		else if (auto right = std::any_cast<double>(&r)) {
+			return calcDecimal(expr->value, *left, *right);
+		}
+	}
+
 	return calcString(expr->value, str(l), str(r));
 }
 
@@ -335,9 +363,18 @@ int32 Interpreter::calcInt(String sign, int32 left, int32 right) {
 	}
 }
 
-std::any Interpreter::calcString(String sign, String left, String right) {
+std::any Interpreter::calcDecimal(String sign, double left, double right) {
 	if (sign == U"+") {
 		return left + right;
+	}
+	else if (sign == U"-") {
+		return left - right;
+	}
+	else if (sign == U"*") {
+		return left * right;
+	}
+	else if (sign == U"/") {
+		return left / right;
 	}
 	else if (sign == U"==") {
 		return toInt(left == right);
@@ -356,6 +393,21 @@ std::any Interpreter::calcString(String sign, String left, String right) {
 	}
 	else if (sign == U">=") {
 		return toInt(left >= right);
+	}
+	else {
+		throw Error{U"Unknown sign for Calc"};
+	}
+}
+
+std::any Interpreter::calcString(String sign, String left, String right) {
+	if (sign == U"+") {
+		return left + right;
+	}
+	else if (sign == U"==") {
+		return toInt(left == right);
+	}
+	else if (sign == U"!=") {
+		return toInt(left != right);
 	}
 	else if (sign == U"&&") {
 		return toInt(isTrue(left) && isTrue(right));
@@ -393,6 +445,18 @@ int32 Interpreter::unaryCalcInt(String sign, int32 left) {
 	}
 	else {
 		throw Error{U"unaryCalcInt Error"};
+	}
+}
+
+double Interpreter::unaryCalcDecimal(String sign, double left) {
+	if (sign == U"+") {
+		return left;
+	}
+	else if (sign == U"-") {
+		return -left;
+	}
+	else {
+		throw Error{U"unaryCalcDecimal Error"};
 	}
 }
 
@@ -488,6 +552,9 @@ bool Interpreter::isTrue(shared_ptr<Token> token) {
 bool Interpreter::isTrue(std::any v) {
 	if (auto p = std::any_cast<int32>(&v)) {
 		return 0 != *p;
+	}
+	else if (auto p = std::any_cast<double>(&v)) {
+		return 0.0 != *p;
 	}
 	else if (auto p = std::any_cast<String>(&v)) {
 		return U"" != *p;

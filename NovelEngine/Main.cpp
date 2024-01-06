@@ -40,6 +40,8 @@ void Main() {
 	println(ar)\
 	var l = length(ar[2])\
 	println(l)\
+	println(1.5 * (1 / 2))\
+	println(1.5 + \"m\")\
 	";
 	auto tokens = Lexer().init(text).tokenize();
 	auto blk = Parser().init(tokens).block();

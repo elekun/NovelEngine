@@ -21,7 +21,7 @@ Parser::Parser() {
 	degrees.emplace(U"||", 30);
 	degrees.emplace(U"=", 10);
 
-	factorKinds = { U"digit", U"ident", U"string"};
+	factorKinds = { U"digit", U"decimal", U"ident", U"string"};
 	binaryKinds = { U"sign" };
 	rightAssocs = { U"=" };
 	unaryOperators = { U"+", U"-", U"!" };

@@ -15,8 +15,8 @@ shared_ptr<Token> Lexer::nextToken() {
 	else if (isSignStart(nowc())) {
 		return sign();
 	}
-	else if (isDigitStart(nowc())) {
-		return digit();
+	else if (isNumberStart(nowc())) {
+		return number();
 	}
 	else if (isStringStart(nowc())) {
 		return str();
@@ -79,7 +79,7 @@ bool Lexer::isSignStart(char32 c) {
 	return c == U'=' || c == U'+' || c == U'-' || c == U'*' || c == U'/' || c == U'!' || c == U'<' || c == U'>' || c == U'&' || c == U'|';
 }
 
-bool Lexer::isDigitStart(char32 c) {
+bool Lexer::isNumberStart(char32 c) {
 	std::locale loc;
 	return std::isdigit<char>(c, loc);
 }
@@ -141,14 +141,23 @@ shared_ptr<Token> Lexer::sign() {
 	return make_shared<Token>(t);
 }
 
-shared_ptr<Token> Lexer::digit() {
+shared_ptr<Token> Lexer::number() {
 	String s = U"";
 	s << next();
 	std::locale loc;
-	while (!isEOT() && std::isdigit<char>(nowc(), loc)) {
+	bool haveComma = false;
+	while (!isEOT() && (std::isdigit<char>(nowc(), loc) || nowc() == U'.')) {
+		if (nowc() == U'.') {
+			if (!haveComma) {
+				haveComma = true;
+			}
+			else {
+				throw Error{U"number error"};
+			}
+		}
 		s << next();
 	}
-	return make_shared<Token>(Token{ U"digit", s });
+	return haveComma ? make_shared<Token>(Token{ U"decimal", s }) : make_shared<Token>(Token{ U"digit", s });
 }
 
 shared_ptr<Token> Lexer::ident() {
