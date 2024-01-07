@@ -48,6 +48,7 @@ public:
 struct GameData {
 	FilePath scriptPath;
 	HashTable<String, std::shared_ptr<Variable>> vars;
+	HashTable<String, std::shared_ptr<Variable>> systemVars;
 };
 
 using GameManager = SceneManager<GameScene, GameData>;

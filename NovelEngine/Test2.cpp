@@ -1108,13 +1108,15 @@ void Test2::readScript() {
 void Test2::interprete(String code) {
 	auto tokens = Lexer().init(code).tokenize();
 	auto blk = Parser().init(tokens).block();
-	this->vars = Interpreter().init(blk, this->vars).run();
+	auto[v, sv] = Interpreter().init(blk, this->vars, getData().systemVars).run();
+	this->vars = v;
+	getData().systemVars = sv;
 }
 
 std::any Test2::getValueFromVariable(String var) {
 	auto tokens = Lexer().init(var).tokenize();
 	auto blk = Parser().init(tokens).block();
-	return Interpreter().init(blk, this->vars).getValue();
+	return Interpreter().init(blk, this->vars, getData().systemVars).getValue();
 }
 
 void Test2::resetTextWindow(Array<String> strs) {
@@ -1354,6 +1356,11 @@ void Test2::draw() const {
 		Print << U"-------------";
 		Print << U"Variable";
 		for (auto [k, v] : vars) {
+			Print << k << U" : " << getVariableList(v->value);
+		}
+		Print << U"";
+		Print << U"System Variable";
+		for (auto [k, v] : getData().systemVars) {
 			Print << k << U" : " << getVariableList(v->value);
 		}
 		Print << U"-------------";

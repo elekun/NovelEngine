@@ -25,7 +25,7 @@ Parser::Parser() {
 	binaryKinds = { U"sign" };
 	rightAssocs = { U"=" };
 	unaryOperators = { U"+", U"-", U"!" };
-	reserved = { U"function",U"return", U"if", U"else", U"while", U"break", U"var", U"for" };
+	reserved = { U"function",U"return", U"if", U"else", U"while", U"break", U"var", U"for", U"system" };
 }
 
 Parser& Parser::init(Array<shared_ptr<Token>> ts) {
@@ -83,6 +83,9 @@ shared_ptr<Token> Parser::lead(shared_ptr<Token> token) {
 	}
 	else if (token->kind == U"ident" && token->value == U"var") {
 		return var(token);
+	}
+	else if (token->kind == U"ident" && token->value == U"system") {
+		return system(token);
 	}
 	else if (factorKinds.contains(token->kind)) {
 		return token;
@@ -245,6 +248,35 @@ shared_ptr<Token> Parser::while_(shared_ptr<Token> token) {
 
 shared_ptr<Token> Parser::var(shared_ptr<Token> token) {
 	token->kind = U"var";
+	token->block = {};
+	shared_ptr<Token> item;
+	shared_ptr<Token> ident = this->ident();
+	if (this->token()->value == U"=") {
+		shared_ptr<Token> op = next();
+		item = bind(ident, op);
+	}
+	else {
+		item = ident;
+	}
+	token->block << item;
+
+	while (this->token()->value == U",") {
+		next();
+		ident = this->ident();
+		if (this->token()->value == U"=") {
+			shared_ptr<Token> op = next();
+			item = bind(ident, op);
+		}
+		else {
+			item = ident;
+		}
+		token->block << item;
+	}
+	return token;
+}
+
+shared_ptr<Token> Parser::system(shared_ptr<Token> token) {
+	token->kind = U"system";
 	token->block = {};
 	shared_ptr<Token> item;
 	shared_ptr<Token> ident = this->ident();
