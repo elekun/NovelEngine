@@ -144,11 +144,12 @@ private:
 		FilePath nextClickPath;
 		Test2* engine;
 		String expr; // クリック時に動作するスクリプト
+		String role; // 特殊機能
 
 	public:
 		Button() : Graphic{} {};
-		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, Test2* en) :
-			hoverPath(h), clickPath(c), expr(e), engine(en), Graphic{n, p, s, sc, o, l, t} {};
+		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, Test2* en) :
+			hoverPath(h), clickPath(c), expr(e), role(r), engine(en), Graphic{n, p, s, sc, o, l, t} {};
 
 		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };
 		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };

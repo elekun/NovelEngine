@@ -473,6 +473,7 @@ void Test2::readScript() {
 					int32 l = 0;
 					Size si = Size::Zero();
 					String e = U"";
+					String r = U"";
 
 					double fa = 0; // フェードインにかかる時間
 					double s = 1.0;
@@ -510,12 +511,15 @@ void Test2::readScript() {
 						if (option == U"exp") {
 							setArgument(op, option, e, arg);
 						}
+						if (option == U"role") {
+							setArgument(op, option, r, arg);
+						}
 					}
 
 					Image img{ nor }; //画像サイズの計算のために一時的にImageを作成
 					si = si.isZero() ? img.size() : si;
 
-					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, this });
+					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, r, this });
 
 					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
@@ -962,7 +966,7 @@ void Test2::readScript() {
 
 					nowWindowText.time += Scene::DeltaTime();
 
-					if (boolCheck(getValueFromVariable(U"isAuto"))) {
+					if (getData().isAuto) {
 						if (nowWindowText.time >= nowWindowText.indexCT * 20) {
 							resetTextWindow({ nowWindowText.sentence });
 							setSaveVariable();
@@ -1450,7 +1454,17 @@ void Test2::Button::update() {
 	}
 
 	if (Rect{ position.asPoint(), size }.leftClicked()) {
-		engine->interprete(expr);
+		if (role) {
+			if (role == U"auto") {
+				engine->getData().isAuto = !engine->getData().isAuto;
+			}
+			else {
+				throw Error{U"role error"};
+			}
+		}
+		else {
+			engine->interprete(expr);
+		}
 	}
 }
 
