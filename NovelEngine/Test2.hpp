@@ -6,6 +6,7 @@
 #include "Parser.hpp"
 #include "Interpreter.hpp"
 
+
 class Test2 : public GameManager::Scene {
 public:
 	Test2(const InitData& init);
@@ -57,6 +58,7 @@ private:
 	void readScript();
 	void interprete(String code);
 	std::any getValueFromVariable(String var);
+	bool boolCheck(std::any value);
 
 	// 全処理共通変数
 	std::function<bool()> mainProcess;
@@ -80,6 +82,7 @@ private:
 	};
 	WindowText nowWindowText;
 	String sentenceStorage;
+	bool checkAuto;
 
 	String nowName; // 今表示される名前
 	void resetTextWindow(Array<String> strs);
@@ -139,12 +142,13 @@ private:
 		FilePath clickPath;
 		Texture nextClick;
 		FilePath nextClickPath;
-		String exp; // クリック時に動作するスクリプト
+		Test2* engine;
+		String expr; // クリック時に動作するスクリプト
 
 	public:
 		Button() : Graphic{} {};
-		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e) :
-			hoverPath(h), clickPath(c), exp(e), Graphic{n, p, s, sc, o, l, t} {};
+		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, Test2* en) :
+			hoverPath(h), clickPath(c), expr(e), engine(en), Graphic{n, p, s, sc, o, l, t} {};
 
 		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };
 		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };

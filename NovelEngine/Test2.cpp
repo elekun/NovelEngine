@@ -8,6 +8,7 @@
 
 using namespace ElephantLib;
 
+
 Test2::Test2(const InitData& init) : IScene{ init } {
 
 	Console << U"script path :" << getData().scriptPath;
@@ -514,7 +515,7 @@ void Test2::readScript() {
 					Image img{ nor }; //画像サイズの計算のために一時的にImageを作成
 					si = si.isZero() ? img.size() : si;
 
-					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e });
+					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, this });
 
 					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
@@ -961,17 +962,26 @@ void Test2::readScript() {
 
 					nowWindowText.time += Scene::DeltaTime();
 
-					// 左クリックorスペースで
-					if (proceedInput.down()) {
-						// 最後まで文字が表示されているなら次に行く
-						if (nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+					if (boolCheck(getValueFromVariable(U"isAuto"))) {
+						if (nowWindowText.time >= nowWindowText.indexCT * 20) {
 							resetTextWindow({ nowWindowText.sentence });
 							setSaveVariable();
 							return true;
 						}
-						// まだ最後まで文字が表示されていないなら最後まで全部出す
-						else {
-							nowWindowText.index = nowWindowText.sentence.size() - 1;
+					}
+					else {
+						// 左クリックorスペースで
+						if (proceedInput.down()) {
+							// 最後まで文字が表示されているなら次に行く
+							if (nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+								resetTextWindow({ nowWindowText.sentence });
+								setSaveVariable();
+								return true;
+							}
+							// まだ最後まで文字が表示されていないなら最後まで全部出す
+							else {
+								nowWindowText.index = nowWindowText.sentence.size() - 1;
+							}
 						}
 					}
 
@@ -987,8 +997,8 @@ void Test2::readScript() {
 					if (nowWindowText.time >= nowWindowText.indexCT) {
 						if (nowWindowText.index < nowWindowText.sentence.size() - 1) {
 							nowWindowText.index++;
+							nowWindowText.time = 0;
 						}
-						nowWindowText.time = 0;
 					}
 
 					return false;
@@ -1115,6 +1125,18 @@ std::any Test2::getValueFromVariable(String var) {
 	return Interpreter().init(blk, this->vars, getData().systemVars).getValue();
 }
 
+bool Test2::boolCheck(std::any value) {
+	if (auto p = std::any_cast<int32>(&value)) {
+		return *p != 0;
+	}
+	else if (auto p = std::any_cast<bool>(&value)) {
+		return *p;
+	}
+	else {
+		throw Error{U"boolCheck Error"};
+	}
+}
+
 void Test2::resetTextWindow(Array<String> strs) {
 	for (auto itr = strs.begin(); itr != strs.end(); ++itr) {
 		scenarioLog << *itr;
@@ -1134,32 +1156,6 @@ void Test2::setSaveVariable() {
 		}
 	}
 	forSaveGraphics = saveGraphics;
-}
-
-String Test2::getVariableList(std::any arg) const {
-	if (auto p = std::any_cast<int32>(&arg)) {
-		return Format(*p);
-	}
-	else if (auto p = std::any_cast<double>(&arg)) {
-		return Format(*p);
-	}
-	else if (auto p = std::any_cast<String>(&arg)) {
-		return *p;
-	}
-	else if (auto p = std::any_cast<Array<std::any>>(&arg)) {
-		String s = U"{";
-		for (int32 i = 0; i < p->size(); i++) {
-			s += getVariableList(p->at(i));
-			if (i < p->size() - 1) {
-				s += U",";
-			}
-		}
-		s += U"}";
-		return s;
-	}
-	else {
-		return U"Function";
-	}
 }
 
 void Test2::update() {
@@ -1190,16 +1186,16 @@ void Test2::update() {
 		}
 	}
 
-	// 画像系の逐次処理
-	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
-		(*itr)->update();
-	}
-
 
 	// メイン処理実行
 	if (mainProcess()) {
 		// 処理が終わったら次の処理を読み込む
 		readScript();
+	}
+
+	// 画像系の逐次処理
+	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+		(*itr)->update();
 	}
 
 	// 音声が停止したら配列から削除
@@ -1410,6 +1406,32 @@ void Test2::draw() const {
 	fadeProcess();
 }
 
+String Test2::getVariableList(std::any arg) const {
+	if (auto p = std::any_cast<int32>(&arg)) {
+		return Format(*p);
+	}
+	else if (auto p = std::any_cast<double>(&arg)) {
+		return Format(*p);
+	}
+	else if (auto p = std::any_cast<String>(&arg)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<Array<std::any>>(&arg)) {
+		String s = U"{";
+		for (int32 i = 0; i < p->size(); i++) {
+			s += getVariableList(p->at(i));
+			if (i < p->size() - 1) {
+				s += U",";
+			}
+		}
+		s += U"}";
+		return s;
+	}
+	else {
+		return U"Function";
+	}
+}
+
 void Test2::Graphic::update() {}
 
 void Test2::Graphic::draw() const {
@@ -1425,6 +1447,10 @@ void Test2::Graphic::draw() const {
 void Test2::Button::update() {
 	if (Rect{ position.asPoint(), size }.mouseOver()) {
 		Cursor::RequestStyle(CursorStyle::Hand);
+	}
+
+	if (Rect{ position.asPoint(), size }.leftClicked()) {
+		engine->interprete(expr);
 	}
 }
 
