@@ -1,6 +1,9 @@
 ﻿#pragma once
 #include <Siv3D.hpp>
 #include <regex>
+#include <any>
+
+class Variable;
 
 enum class GameScene {
 	Initialize,
@@ -49,17 +52,26 @@ struct SIV3D_HIDDEN fmt::formatter<mono, s3d::char32> {
 };
 
 using v_type = std::variant<mono, int32, double, String, bool, Point>;
-using TYPE = std::variant<mono, int32, String, double>;
+
+
+void ThrowArgumentError(const StringView operation, const StringView name, const String type, const v_type value);
+
+void ThrowParseError(const String type, const v_type value);
+
+
+class Variable {
+public:
+	String name;
+	std::any value;
+	Variable() {};
+	Variable(String n, std::any v) : name(n), value(v) {};
+};
 
 struct GameData {
 	FilePath scriptPath;
 	HashTable<VariableKey, v_type> grobalVariable;
 	HashTable<VariableKey, v_type> variable;
+	HashTable<String, std::shared_ptr<Variable>> vars;
 };
 
 using GameManager = SceneManager<GameScene, GameData>;
-
-#include "Test.hpp"
-#include "Test2.hpp"
-#include "Initialize.hpp"
-#include "MyError.hpp"

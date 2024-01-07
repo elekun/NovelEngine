@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include <memory>
 #include "GameScene.hpp"
 #include "Token.hpp"
 #include <any>
@@ -10,31 +9,6 @@ class Func;
 class DynamicFunc;
 
 using namespace std;
-
-
-class Variable {
-public:
-	String name;
-	std::any value;
-	Variable() {};
-	Variable(String n, std::any v) : name(n), value(v) {};
-
-	String toString() {
-		String s;
-		if (auto p = std::any_cast<TYPE>(&value)) {
-			std::visit([&s](auto& x) {
-				s = Format();
-			}, *p);
-		}
-		else if (auto p = std::any_cast<shared_ptr<Variable>>(&value)) {
-			s = U"Variable";
-		}
-		else {
-			s = U"Function";
-		}
-		return s;
-	}
-};
 
 class Func {
 public:

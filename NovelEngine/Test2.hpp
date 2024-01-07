@@ -2,6 +2,10 @@
 #include <Siv3D.hpp>
 #include "GameScene.hpp"
 
+#include "Lexer.hpp"
+#include "Parser.hpp"
+#include "Interpreter.hpp"
+
 class Test2 : public GameManager::Scene {
 public:
 	Test2(const InitData& init);
@@ -22,6 +26,7 @@ private:
 
 	// ゲーム内変数
 	HashTable<VariableKey, v_type> variable;
+	HashTable<String, shared_ptr<Variable>> vars;
 	v_type stringToVariable(String type = U"string", String v = U"");
 	void setVariable(bool isGrobal, VariableKey key, String type = U"string", String v = U"");
 	void loadVariable();
@@ -56,6 +61,7 @@ private:
 	void readScriptLine(String& s);
 	void readScript();
 	void analyzeCode(String code);
+	void interprete(String code);
 
 	// 全処理共通変数
 	std::function<bool()> mainProcess;

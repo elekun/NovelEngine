@@ -1,8 +1,9 @@
 ﻿#include <Siv3D.hpp>
 #include "GameScene.hpp"
-#include "Lexer.hpp"
-#include "Parser.hpp"
-#include "Interpreter.hpp"
+
+#include "Initialize.hpp"
+#include "Test2.hpp"
+
 
 void registerFontAsset() {
 	for (auto i : Range(1, 256)) {
@@ -29,25 +30,10 @@ void Main() {
 	registerPixelShaderAsset();
 
 	GameManager manager;
-	manager.add<Test>(GameScene::Test);
 	manager.add<Initialize>(GameScene::Initialize);
 	manager.add<Test2>(GameScene::Test2);
 
 	manager.init(GameScene::Initialize);
-
-	String text = U"\
-	var ar = [1, 2, \"aaaaa\"]\
-	println(ar)\
-	var l = length(ar[2])\
-	println(l)\
-	println(1.5 * (1 / 2))\
-	println(1.5 + \"m\")\
-	";
-	auto tokens = Lexer().init(text).tokenize();
-	auto blk = Parser().init(tokens).block();
-	HashTable<String, shared_ptr<Variable>> vars = {};
-	vars = Interpreter().init(blk, vars).run();
-	
 
 	while (System::Update()) {
 		if (!manager.update()) {

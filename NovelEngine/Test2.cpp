@@ -2,6 +2,10 @@
 #include "Test2.hpp"
 #include "ElephantLib.hpp"
 
+#include "Lexer.hpp"
+#include "Parser.hpp"
+#include "Interpreter.hpp"
+
 using namespace ElephantLib;
 
 Test2::Test2(const InitData& init) : IScene{ init } {
@@ -220,9 +224,24 @@ void Test2::readScript() {
 
 			v_type value;
 
-			// variable or not
-			if (auto mr = RegExp(U"<([0-9a-zA-Z_]+)>").match(optionArg)) {
-				value = variable[VariableKey{String{mr[1].value()}, 0}];
+
+			// 変数から取り出す部分を要検討
+			if (auto mr = RegExp(U"<([0-9a-zA-Z_]+)(\\[[0-9]\\])*>").match(optionArg)) {
+				Console << U"MatchResult size : " << mr.size();
+				String varName = String{ mr[1].value() };
+				std::any v = this->vars[varName]->value;
+				if (auto p = std::any_cast<int32>(&v)) {
+					value = *p;
+				}
+				else if (auto p = std::any_cast<double>(&v)) {
+					value = *p;
+				}
+				else if (auto p = std::any_cast<String>(&v)) {
+					value = *p;
+				}
+				else {
+					throw Error{U"不適切な変数です"};
+				}
 				args << std::make_pair(optionName, value);
 				continue;
 			}
@@ -240,21 +259,21 @@ void Test2::readScript() {
 				Array<int32> tmp = {};
 				for (int32 i = 1; i < mr.size(); i++) {
 					String tmp_s{ mr[i].value() };
-					if (auto mr2 = RegExp(U"<([0-9a-zA-Z_]+)>").match(tmp_s)) {
-						v_type _v = variable[VariableKey{String{mr2[1].value()}, 0}];
-						if (auto p = std::get_if<int32>(&_v)) {
+
+					if (auto mr = RegExp(U"<([0-9a-zA-Z_]+)(\\[[0-9]\\])*>").match(tmp_s)) {
+						String varName = String{ mr[1].value() };
+						std::any v = this->vars[varName]->value;
+						if (auto p = std::any_cast<int32>(&v)) {
 							tmp << *p;
 						}
 						else {
-							throw Error{U"Value Error : point型の要素にはint型しか用いることができません"};
+							throw Error{U"不適切な変数です"};
 						}
+						continue;
 					}
 					else {
 						if (auto e = ParseOpt<int32>(tmp_s)) {
 							tmp << *e;
-						}
-						else {
-							throw Error{U"Value Error : point型の要素にはint型しか用いることができません"};
 						}
 					}
 				}
@@ -933,16 +952,16 @@ void Test2::readScript() {
 					isCodeLine = false;
 				}
 				else {
-					code += line;
+					code += line + U" ";
 				}
 			}
-			analyzeCode(code);
+			interprete(code);
 			line = U"";
 		}
 		// 1行
 		if (RegExp(U" *`([^`]*)` *").fullMatch(line)) {
 			String code = String{ RegExp(U" *`([^`]*)` *").match(line)[1].value() };
-			analyzeCode(code);
+			interprete(code);
 			line = U"";
 		}
 
@@ -1228,6 +1247,12 @@ void Test2::analyzeCode(String code){
 			}
 		}
 	}
+}
+
+void Test2::interprete(String code) {
+	auto tokens = Lexer().init(code).tokenize();
+	auto blk = Parser().init(tokens).block();
+	this->vars = Interpreter().init(blk, this->vars).run();
 }
 
 void Test2::resetTextWindow(Array<String> strs) {
