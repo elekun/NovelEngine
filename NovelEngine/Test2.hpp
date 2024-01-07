@@ -23,13 +23,9 @@ private:
 	ConstantBuffer<EffectSetting> cb;
 
 
-
 	// ゲーム内変数
-	HashTable<VariableKey, v_type> variable;
 	HashTable<String, shared_ptr<Variable>> vars;
 	v_type stringToVariable(String type = U"string", String v = U"");
-	void setVariable(bool isGrobal, VariableKey key, String type = U"string", String v = U"");
-	void loadVariable();
 
 	// 汎用関数
 	Array<String> splitArgs(String s);
@@ -52,7 +48,6 @@ private:
 	bool isAuto;
 
 
-
 	// スクリプト用変数
 	Array<String> scriptLines;
 	size_t scriptIndex;
@@ -60,8 +55,8 @@ private:
 
 	void readScriptLine(String& s);
 	void readScript();
-	void analyzeCode(String code);
 	void interprete(String code);
+	std::any getValueFromVariable(String var);
 
 	// 全処理共通変数
 	std::function<bool()> mainProcess;
@@ -210,4 +205,5 @@ private:
 	// デバッグ用
 	bool isShowingLog;
 	bool isShowingVariable;
+	String getVariableList(std::any value) const;
 };

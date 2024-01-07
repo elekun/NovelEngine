@@ -25,7 +25,7 @@ Parser::Parser() {
 	binaryKinds = { U"sign" };
 	rightAssocs = { U"=" };
 	unaryOperators = { U"+", U"-", U"!" };
-	reserved = { U"function",U"return", U"if", U"else", U"while", U"break", U"var"};
+	reserved = { U"function",U"return", U"if", U"else", U"while", U"break", U"var", U"for" };
 }
 
 Parser& Parser::init(Array<shared_ptr<Token>> ts) {
@@ -73,6 +73,9 @@ shared_ptr<Token> Parser::lead(shared_ptr<Token> token) {
 	}
 	else if (token->kind == U"ident" && token->value == U"while") {
 		return while_(token);
+	}
+	else if (token->kind == U"ident" && token->value == U"for") {
+		return for_(token);
 	}
 	else if (token->kind == U"ident" && token->value == U"break") {
 		token->kind = U"brk";
@@ -296,3 +299,21 @@ shared_ptr<Token> Parser::newArray(shared_ptr<Token> token) {
 	return token;
 }
 
+shared_ptr<Token> Parser::for_(shared_ptr<Token> token) {
+	token->kind = U"for";
+	consume(U"(");
+	token->left = expression(0);
+	consume(U";");
+	token->center = expression(0);
+	consume(U";");
+	token->right = expression(0);
+	consume(U")");
+	if (this->token()->value == U"{") {
+		token->block = body();
+	}
+	else {
+		token->block = {};
+		token->block << expression(0);
+	}
+	return token;
+}

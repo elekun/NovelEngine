@@ -126,7 +126,6 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Test.cpp" />
     <ClCompile Include="Test2.cpp" />
     <ClCompile Include="Token.cpp" />
   </ItemGroup>
@@ -331,7 +330,6 @@
     <ClInclude Include="Lexer.hpp" />
     <ClInclude Include="Parser.hpp" />
     <ClInclude Include="stdafx.h" />
-    <ClInclude Include="Test.hpp" />
     <ClInclude Include="Test2.hpp" />
     <ClInclude Include="Token.hpp" />
   </ItemGroup>

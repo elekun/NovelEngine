@@ -98,7 +98,7 @@ bool Lexer::isCurlyStart(char32 c) {
 }
 
 bool Lexer::isSymbolStart(char32 c) {
-	return c == U',';
+	return c == U',' || c == ';';
 }
 
 bool Lexer::isStringStart(char32 c) {

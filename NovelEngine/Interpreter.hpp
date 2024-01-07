@@ -68,12 +68,14 @@ public:
 	Interpreter(){};
 	Interpreter& init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs);
 	HashTable<String, shared_ptr<Variable>> run();
+	std::any getValue();
 	std::any process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk);
 	std::any expression(shared_ptr<Token> expr);
 	int32 digit(shared_ptr<Token> token);
 	double decimal(shared_ptr<Token> token);
 	std::any ident(shared_ptr<Token> token);
 	shared_ptr<Variable> assign(shared_ptr<Token> expr);
+	shared_ptr<Variable> checkArray(shared_ptr<Token> expr, Array<int32>& indexList);
 	shared_ptr<Variable> variable(std::any value);
 	std::any value(std::any v);
 	int32 integer(std::any v);
@@ -102,5 +104,6 @@ public:
 	std::any newArray(shared_ptr<Token> expr);
 	std::any accessArray(shared_ptr<Token> expr);
 	std::any arr(std::any v);
+	std::any for_(shared_ptr<Token> token, Optional<bool>& ret);
 };
 

@@ -64,23 +64,6 @@ v_type Test2::stringToVariable(String type, String v) {
 	return value;
 }
 
-void Test2::setVariable(bool isGrobal, VariableKey key, String type, String v) {
-	v_type value = stringToVariable(type, v);
-
-	if (isGrobal) {
-		getData().grobalVariable[key] = value;
-	}
-	else {
-		variable[key] = value;
-	}
-}
-
-void Test2::loadVariable() {
-	for (auto [k, v] : getData().variable) {
-		variable[k] = v;
-	}
-}
-
 Array<String> Test2::splitArgs(String s) {
 	if (s == U"") {
 		return {};
@@ -225,11 +208,8 @@ void Test2::readScript() {
 			v_type value;
 
 
-			// 変数から取り出す部分を要検討
-			if (auto mr = RegExp(U"<([0-9a-zA-Z_]+)(\\[[0-9]\\])*>").match(optionArg)) {
-				Console << U"MatchResult size : " << mr.size();
-				String varName = String{ mr[1].value() };
-				std::any v = this->vars[varName]->value;
+			if (auto mr = RegExp(U"<(.+)>").match(optionArg)) {
+				std::any v = getValueFromVariable(String{ mr[1].value() });
 				if (auto p = std::any_cast<int32>(&v)) {
 					value = *p;
 				}
@@ -260,9 +240,8 @@ void Test2::readScript() {
 				for (int32 i = 1; i < mr.size(); i++) {
 					String tmp_s{ mr[i].value() };
 
-					if (auto mr = RegExp(U"<([0-9a-zA-Z_]+)(\\[[0-9]\\])*>").match(tmp_s)) {
-						String varName = String{ mr[1].value() };
-						std::any v = this->vars[varName]->value;
+					if (auto mr = RegExp(U"<(.+)>").match(tmp_s)) {
+						std::any v = getValueFromVariable(String{ mr[1].value() });
 						if (auto p = std::any_cast<int32>(&v)) {
 							tmp << *p;
 						}
@@ -1126,133 +1105,16 @@ void Test2::readScript() {
 	}
 }
 
-void Test2::analyzeCode(String code){
-	Array<String> exps = {};
-
-	// split by ";"
-	String tmp = U"";
-	char32 quote = U' ';
-	for (auto i : step(code.length())) {
-		char32 c = code[i];
-
-		for (auto q : { U'\'', U'"', U'`' }) {
-			if (c == q) {
-				if (quote == U' ') {
-					quote = c;
-				}
-				else if (quote == q) {
-					quote = U' ';
-				}
-			}
-		}
-
-		if (c == U';' && quote == U' ') {
-			exps << tmp;
-			tmp = U"";
-		}
-		else {
-			tmp << c;
-		}
-	}
-
-	Array<String> var_type = { U"int", U"double", U"string", U"bool", U"point"};
-	String vl = U"";
-	for (auto [j, p] : Indexed(var_type)) {
-		vl += p;
-		if (j != vl.size() - 1) { vl += U"|"; }
-	}
-
-	for (auto i: step(exps.size())) {
-		String exp = eraseFrontBackChar(exps.at(i), U' ');
-
-		/*
-		* 変数宣言＆初期化
-		* grobal int x = 32;
-		* string s = "test";
-		* grobal double array[3] = {1.0, 2.0, 3.0};
-		*/
-		String re = U"(|grobal +)({}) +([a-zA-Z_]\\w*)(|\\[\\d+\\]) += +(.+)"_fmt(vl);
-		if (RegExp(re).fullMatch(exp)) {
-			auto t = RegExp(re).match(exp);
-			if (t.size() != 6) {
-				throw Error{U"syntax error: assignment statement is incorrect.\n{}"_fmt(exp)};
-			}
-
-			bool isGrobal = eraseFrontBackChar(String{ t[1].value() }, U' ') == U"grobal";
-			String type = eraseFrontBackChar(String{ t[2].value() }, U' ');
-			String var = eraseFrontBackChar(String{ t[3].value() }, U' ');
-
-			int32 size = 1;
-			Optional<int32>st = ParseOpt<int32>(eraseBackChar(eraseFrontChar(eraseFrontBackChar(String{ t[4].value() }, U' '), U'['), U']'));
-			if (st.has_value()) {
-				if (st.value() > 1) {
-					size = st.value();
-				}
-			}
-			String value = eraseFrontBackChar(String{ t[5].value() }, U' ');
-
-			if (size > 1) {
-				if (value.front() != U'{' || value.back() != U'}') {
-					throw Error{U"syntax error: value of '{}' is not array"_fmt(value)};
-				}
-
-				// { と } を削除
-				value.pop_front();
-				value.pop_back();
-
-				// カンマ区切り
-				Array<String> v_arr;
-				String tmp = U"";
-				char32 quote = U' ';
-				for (auto j : step(value.length())) {
-					char32 c = value[j];
-
-					for (auto q : { U'\'', U'"', U'`' }) {
-						if (c == q) {
-							if (quote == U' ') {
-								quote = c;
-							}
-							else if (quote == q) {
-								quote = U' ';
-							}
-						}
-					}
-
-					if (c == U',' && quote == U' ') {
-						v_arr << eraseFrontBackChar(tmp, U' ');
-						tmp = U"";
-					}
-					else {
-						tmp << c;
-					}
-				}
-				tmp = eraseFrontBackChar(tmp, U' ');
-				if (!tmp.isEmpty()) {
-					v_arr << tmp;
-				}
-
-				if (v_arr.size() > size) {
-					throw Error{U"array element is too many."};
-				}
-
-				for (auto j : step(size)) {
-					auto key = VariableKey{ var, j };
-					String _v = j < v_arr.size() ? v_arr[j] : U"";
-					setVariable(isGrobal, key, type, _v);
-				}
-			}
-			else {
-				auto key = VariableKey{ var, 0 };
-				setVariable(isGrobal, key, type, value);
-			}
-		}
-	}
-}
-
 void Test2::interprete(String code) {
 	auto tokens = Lexer().init(code).tokenize();
 	auto blk = Parser().init(tokens).block();
 	this->vars = Interpreter().init(blk, this->vars).run();
+}
+
+std::any Test2::getValueFromVariable(String var) {
+	auto tokens = Lexer().init(var).tokenize();
+	auto blk = Parser().init(tokens).block();
+	return Interpreter().init(blk, this->vars).getValue();
 }
 
 void Test2::resetTextWindow(Array<String> strs) {
@@ -1273,6 +1135,32 @@ void Test2::setSaveVariable() {
 		}
 	}
 	forSaveGraphics = saveGraphics;
+}
+
+String Test2::getVariableList(std::any arg) const {
+	if (auto p = std::any_cast<int32>(&arg)) {
+		return Format(*p);
+	}
+	else if (auto p = std::any_cast<double>(&arg)) {
+		return Format(*p);
+	}
+	else if (auto p = std::any_cast<String>(&arg)) {
+		return *p;
+	}
+	else if (auto p = std::any_cast<Array<std::any>>(&arg)) {
+		String s = U"{";
+		for (int32 i = 0; i < p->size(); i++) {
+			s += getVariableList(p->at(i));
+			if (i < p->size() - 1) {
+				s += U",";
+			}
+		}
+		s += U"}";
+		return s;
+	}
+	else {
+		return U"Function";
+	}
 }
 
 void Test2::update() {
@@ -1307,7 +1195,7 @@ void Test2::update() {
 	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
 		(*itr)->update();
 	}
-	
+
 
 	// メイン処理実行
 	if (mainProcess()) {
@@ -1337,6 +1225,7 @@ void Test2::update() {
 		writer(forSaveGraphics); //画像をシリアライズして保存はできないので、画像そのものではなく画像情報を保存
 
 		// 変数書き込み
+		/*
 		Array<VariableKey> k_tmp;
 		Array<v_type> v_tmp;
 		Array<String> t_tmp;
@@ -1368,6 +1257,7 @@ void Test2::update() {
 			}, v_tmp[i]);
 		}
 		// -------
+		*/
 
 		Print << U"Saved!";
 	}
@@ -1391,6 +1281,7 @@ void Test2::update() {
 			(*itr)->setTexture();
 		}
 
+		/*
 		variable.clear();
 		Array<String> typeList;
 		reader(typeList); //変数リスト
@@ -1427,6 +1318,7 @@ void Test2::update() {
 
 			variable[k] = v;
 		}
+		*/
 
 		// 実行中の各種処理を初期化
 		resetTextWindow({});
@@ -1461,17 +1353,8 @@ void Test2::draw() const {
 	if (isShowingVariable) {
 		Print << U"-------------";
 		Print << U"Variable";
-		for (auto [k, v] : variable) {
-			std::visit([k = k](auto& x) {
-				Print << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
-			}, v);
-		}
-		Print << U"\n";
-		Print << U"Grobal Variable";
-		for (auto [k, v] : getData().grobalVariable) {
-			std::visit([k = k](auto& x) {
-				Print << U"{} {}[{}] : {}"_fmt(Unicode::Widen(typeid(x).name()), k.name, k.index, x);
-			}, v);
+		for (auto [k, v] : vars) {
+			Print << k << U" : " << getVariableList(v->value);
 		}
 		Print << U"-------------";
 		return;

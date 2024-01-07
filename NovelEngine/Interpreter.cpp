@@ -46,6 +46,9 @@ String Println::getPrintString(std::any arg) {
 	else if (auto p = std::any_cast<String>(&arg)) {
 		return *p;
 	}
+	else if (auto p = std::any_cast<mono>(&arg)) {
+		return Format(*p);
+	}
 	else if (auto p = std::any_cast<Array<std::any>>(&arg)) {
 		String s = U"{";
 		for (int32 i = 0; i < p->size(); i++) {
@@ -114,6 +117,14 @@ HashTable<String, shared_ptr<Variable>> Interpreter::run() {
 	return grobal->variables;
 }
 
+std::any Interpreter::getValue() {
+	if (body.size() != 1) {
+		throw Error{U"getValue error"};
+	}
+	auto expr = body[0];
+	return value(expression(expr));
+}
+
 std::any Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk) {
 	for (auto expr : b) {
 		if (expr->kind == U"if") {
@@ -146,6 +157,12 @@ std::any Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, O
 			}
 			brk = true;
 			return mono{};
+		}
+		else if (expr->kind == U"for") {
+			std::any val = for_(expr, ret);
+			if (ret.has_value() && ret.value()) {
+				return val;
+			}
 		}
 		else if(expr->kind == U"var") {
 			var(expr);
@@ -226,10 +243,41 @@ std::any Interpreter::ident(shared_ptr<Token> token) {
 }
 
 shared_ptr<Variable> Interpreter::assign(shared_ptr<Token> expr) {
-	shared_ptr<Variable> var = variable(expression(expr->left));
+	shared_ptr<Variable> var;
 	std::any v = value(expression(expr->right));
-	var->value = v;
+	if (expr->left->value == U"[") {
+		Array<int32> indexList = {};
+		var = checkArray(expr->left, indexList);
+
+		std::any* ar = &(var->value);
+		for (auto index : indexList) {
+			if (auto p = std::any_cast<Array<std::any>>(ar)) {
+				ar = &(p->at(index));
+			}
+			else {
+				throw Error{U"array access error"};
+			}
+		}
+		*ar = v;
+	}
+	else {
+		var = variable(expression(expr->left));
+		var->value = v;
+	}
 	return var;
+}
+
+shared_ptr<Variable> Interpreter::checkArray(shared_ptr<Token> expr, Array<int32>& indexList) {
+	int32 index = integer(expression(expr->right));
+	indexList.push_front(index);
+
+	if (expr->left->value == U"[") {
+		return checkArray(expr->left, indexList);
+	}
+	else {
+		shared_ptr<Variable> var = variable(expression(expr->left));
+		return var;
+	}
 }
 
 shared_ptr<Variable> Interpreter::variable(std::any value) {
@@ -674,4 +722,19 @@ std::any Interpreter::arr(std::any v) {
 		return arr((*p)->value);
 	}
 	throw Error{U"right value error"};
+}
+
+std::any Interpreter::for_(shared_ptr<Token> token, Optional<bool>& ret) {
+	Optional<bool> brk = false;
+	std::any val;
+	for (expression(token->left); isTrue(token->center); expression(token->right)) {
+		val = process(token->block, ret, brk);
+		if (ret.has_value() && ret.value()) {
+			return val;
+		}
+		if (brk.value()) {
+			return mono{};
+		}
+	}
+	return mono{};
 }
