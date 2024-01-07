@@ -115,9 +115,6 @@ std::tuple<HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr
 	Optional<bool> ret;
 	Optional<bool> brk;
 	process(body, ret, brk);
-	for (auto [k, v] : system->variables) {
-		Console << k;
-	}
 	return { grobal->variables, system->variables };
 }
 

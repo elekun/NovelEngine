@@ -66,9 +66,21 @@ private:
 	InputGroup proceedInput;
 
 	// テキスト表示用変数
-	size_t strIndex; // 何文字目まで表示するか(0 index)
-	double indexCT; // 1文字あたり何秒で表示するか
-	String nowSentence; // 今表示される文章
+	struct WindowText {
+	public:
+		size_t index;
+		double indexCT;
+		String sentence;
+
+		double time;
+		Audio voice;
+
+		WindowText() : index(0), indexCT(0.0), sentence(U""), time(0.0) {
+		};
+	};
+	WindowText nowWindowText;
+	String sentenceStorage;
+
 	String nowName; // 今表示される名前
 	void resetTextWindow(Array<String> strs);
 

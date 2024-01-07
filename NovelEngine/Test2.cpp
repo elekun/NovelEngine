@@ -27,8 +27,6 @@ Test2::Test2(const InitData& init) : IScene{ init } {
 	forSaveIndex = 0;
 	readStopFlag = false;
 
-	strIndex = 0;
-	indexCT = 0.05;
 
 	mainProcess = [&, this]() { return true; };
 	fadeProcess = [&, this]() {};
@@ -953,51 +951,49 @@ void Test2::readScript() {
 				operateLine = tmp[1].value();
 			}
 
-			if (nowSentence != U"") {
-				if (nowSentence.back() == '\n') {
-					nowSentence = nowSentence.substr(0, nowSentence.size() - 1); // 改行削除
+			if (sentenceStorage != U"") {
+				if (sentenceStorage.back() == '\n') {
+					nowWindowText.sentence = sentenceStorage.substr(0, sentenceStorage.size() - 1); // 改行削除
 				}
+				nowWindowText.indexCT = 0.05;
 
-				std::function<std::function<bool()>()> f = [&, this]() {
-					double time = 0.0;
-					return [&, this, time]() mutable {
+				std::function<bool()> f = [&, this]() {
 
-						time += Scene::DeltaTime();
+					nowWindowText.time += Scene::DeltaTime();
 
-						// 左クリックorスペースで
-						if (proceedInput.down()) {
-							// 最後まで文字が表示されているなら次に行く
-							if (strIndex >= nowSentence.size() - 1) {
-								resetTextWindow({ nowSentence });
-								setSaveVariable();
-								return true;
-							}
-							// まだ最後まで文字が表示されていないなら最後まで全部出す
-							else {
-								strIndex = nowSentence.size() - 1;
-							}
-						}
-
-						// 選択肢が用意されているときの処理
-						// 文字が最後まで表示されたら
-						if (!selections.isEmpty() && strIndex >= nowSentence.size() - 1) {
-							// 選択肢を表示しておく
-							isShowSelection = true;
+					// 左クリックorスペースで
+					if (proceedInput.down()) {
+						// 最後まで文字が表示されているなら次に行く
+						if (nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+							resetTextWindow({ nowWindowText.sentence });
+							setSaveVariable();
 							return true;
 						}
-
-						// 1文字ずつ順番に表示する
-						if (time >= indexCT) {
-							if (strIndex < nowSentence.size() - 1) {
-								strIndex++;
-							}
-							time = 0;
+						// まだ最後まで文字が表示されていないなら最後まで全部出す
+						else {
+							nowWindowText.index = nowWindowText.sentence.size() - 1;
 						}
+					}
 
-						return false;
-					};
+					// 選択肢が用意されているときの処理
+					// 文字が最後まで表示されたら
+					if (!selections.isEmpty() && nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+						// 選択肢を表示しておく
+						isShowSelection = true;
+						return true;
+					}
+
+					// 1文字ずつ順番に表示する
+					if (nowWindowText.time >= nowWindowText.indexCT) {
+						if (nowWindowText.index < nowWindowText.sentence.size() - 1) {
+							nowWindowText.index++;
+						}
+						nowWindowText.time = 0;
+					}
+
+					return false;
 				};
-				setMainProcess(f());
+				setMainProcess(f);
 			}
 			else {
 				// nowSentence に何も文字列が入ってないとき
@@ -1058,7 +1054,7 @@ void Test2::readScript() {
 			}
 			else {
 				// 選択肢でないならウィンドウに表示する（つまり普通の）文字列として処理
-				nowSentence += line + U"\n";
+				sentenceStorage += line + U"\n";
 			}
 		}
 
@@ -1076,7 +1072,7 @@ void Test2::readScript() {
 
 				for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
 					if (Rect{ itr->pos, itr->size }.leftReleased() && isClicked) {
-						resetTextWindow({ nowSentence, U"choiced : " + itr->text });
+						resetTextWindow({ nowWindowText.sentence, U"choiced : " + itr->text });
 						setSaveVariable();
 						isShowSelection = false;
 
@@ -1123,8 +1119,9 @@ void Test2::resetTextWindow(Array<String> strs) {
 	for (auto itr = strs.begin(); itr != strs.end(); ++itr) {
 		scenarioLog << *itr;
 	}
-	nowSentence = U"";
-	strIndex = 0;
+
+	sentenceStorage = U"";
+	nowWindowText = WindowText{};
 }
 
 void Test2::setSaveVariable() {
@@ -1401,7 +1398,7 @@ void Test2::draw() const {
 
 	FontAsset(U"Medium{}"_fmt(nameSize))(nowName).draw(namePos, Palette::White);
 
-	FontAsset(U"Medium{}"_fmt(textSize))(nowSentence.substr(0, strIndex + 1)).draw(textPos, Palette::White);
+	FontAsset(U"Medium{}"_fmt(textSize))(nowWindowText.sentence.substr(0, nowWindowText.index + 1)).draw(textPos, Palette::White);
 
 	if (isShowSelection) {
 		for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
