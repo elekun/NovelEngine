@@ -863,7 +863,7 @@ void Engine::readScript() {
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == dst) {
 									scriptStack.pop_back();
-									scriptStack << ScriptData{reader, i};
+									scriptStack << ScriptData{reader, i, i};
 									flag = true;
 								}
 							}
@@ -1122,7 +1122,7 @@ void Engine::readScript() {
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == itr->dst) {
 									scriptStack.pop_back();
-									scriptStack << ScriptData{reader, i};
+									scriptStack << ScriptData{reader, i, i};
 									flag = true;
 								}
 							}
@@ -1181,6 +1181,10 @@ void Engine::resetTextWindow(Array<String> strs) {
 }
 
 void Engine::setSaveVariable() {
+	for (auto s : scriptStack) {
+		s.saveIndex = s.index;
+	}
+
 	Array<Graphic> saveGraphics = {};
 	for (auto g : graphics) {
 		if (typeid((*g)) == typeid(Graphic)) {
@@ -1248,13 +1252,13 @@ void Engine::update() {
 		// script
 		// writer(forSaveIndex);
 		Array<FilePath> scriptPathList;
-		Array<size_t> scriptIndexList;
+		Array<size_t> scriptSaveIndexList;
 		for (auto s : scriptStack) {
 			scriptPathList << s.reader.path();
-			scriptIndexList << s.index;
+			scriptSaveIndexList << s.saveIndex;
 		}
 		writer(scriptPathList);
-		writer(scriptIndexList);
+		writer(scriptSaveIndexList);
 
 		writer(operateLine);
 		writer(nowName);
@@ -1306,19 +1310,19 @@ void Engine::update() {
 
 		scriptStack = {};
 		Array<FilePath> scriptPathList;
-		Array<size_t> scriptIndexList;
+		Array<size_t> scriptSaveIndexList;
 		reader(scriptPathList);
-		reader(scriptIndexList);
+		reader(scriptSaveIndexList);
 		for (auto i : step(scriptPathList.size())) {
 			TextReader tr{ scriptPathList[i] };
-			size_t index = scriptIndexList[i];
+			size_t index = scriptSaveIndexList[i];
 			if (!tr) throw Error{ U"Failed to open `{}`"_fmt(scriptPathList[i]) };
 
 			for (auto j : step(index)) {
 				tr.readLine();
 			}
 
-			scriptStack << ScriptData{tr, index};
+			scriptStack << ScriptData{tr, index, index};
 		}
 
 		reader(operateLine);

@@ -51,9 +51,10 @@ private:
 
 	// スクリプト用変数
 	struct ScriptData {
-		ScriptData(TextReader tr, size_t i) : reader(tr), index(i) {};
+		ScriptData(TextReader tr, size_t i, size_t si) : reader(tr), index(i), saveIndex(si) {};
 		TextReader reader;
 		size_t index;
+		size_t saveIndex;
 	};
 	Array<ScriptData> scriptStack;
 
