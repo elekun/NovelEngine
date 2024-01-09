@@ -1181,8 +1181,8 @@ void Engine::resetTextWindow(Array<String> strs) {
 }
 
 void Engine::setSaveVariable() {
-	for (auto s : scriptStack) {
-		s.saveIndex = s.index;
+	for (auto itr = scriptStack.begin(); itr != scriptStack.end(); itr++) {
+		itr->saveIndex = itr->index;
 	}
 
 	Array<Graphic> saveGraphics = {};
