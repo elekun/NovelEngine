@@ -7,8 +7,7 @@ class Variable;
 
 enum class GameScene {
 	Initialize,
-	Test,
-	Test2,
+	Engine,
 };
 
 struct mono {

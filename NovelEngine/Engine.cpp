@@ -1,5 +1,5 @@
 ﻿#include "stdafx.h"
-#include "Test2.hpp"
+#include "Engine.hpp"
 #include "ElephantLib.hpp"
 
 #include "Lexer.hpp"
@@ -9,7 +9,7 @@
 using namespace ElephantLib;
 
 
-Test2::Test2(const InitData& init) : IScene{ init } {
+Engine::Engine(const InitData& init) : IScene{ init } {
 
 	Console << U"script path :" << getData().scriptPath;
 
@@ -23,7 +23,11 @@ Test2::Test2(const InitData& init) : IScene{ init } {
 		throw Error{ U"Failed to open `{}`"_fmt(getData().scriptPath) };
 	}
 
-	scriptLines = reader.readLines();
+	scriptLines = {};
+	for (auto l : reader.readLines()) {
+		scriptLines << std::make_pair(l, getData().scriptPath);
+	}
+
 	scriptIndex = 0;
 	forSaveIndex = 0;
 	readStopFlag = false;
@@ -43,7 +47,7 @@ Test2::Test2(const InitData& init) : IScene{ init } {
 	proceedInput = MouseL | KeyEnter | KeySpace;
 }
 
-v_type Test2::stringToVariable(String type, String v) {
+v_type Engine::stringToVariable(String type, String v) {
 	v_type value;
 	if (type == U"int") {
 		value = v.isEmpty() ? 0 : Parse<int32>(v);
@@ -63,7 +67,7 @@ v_type Test2::stringToVariable(String type, String v) {
 	return value;
 }
 
-Array<String> Test2::splitArgs(String s) {
+Array<String> Engine::splitArgs(String s) {
 	if (s == U"") {
 		return {};
 	}
@@ -111,7 +115,7 @@ Array<String> Test2::splitArgs(String s) {
 }
 
 template<typename T>
-inline void Test2::setArgument(StringView op, StringView option, T& v, v_type arg) {
+inline void Engine::setArgument(StringView op, StringView option, T& v, v_type arg) {
 	if (auto p = std::get_if<T>(&arg)) {
 		v = *p;
 	}
@@ -121,7 +125,7 @@ inline void Test2::setArgument(StringView op, StringView option, T& v, v_type ar
 }
 
 template<typename T>
-inline void Test2::setArgumentParse(StringView op, StringView option, T& v, v_type arg) {
+inline void Engine::setArgumentParse(StringView op, StringView option, T& v, v_type arg) {
 	Optional<T> o = std::visit([](auto& x) {
 		return ParseOpt<T>(Format(x));
 	}, arg);
@@ -135,13 +139,13 @@ inline void Test2::setArgumentParse(StringView op, StringView option, T& v, v_ty
 }
 
 template<>
-inline void Test2::setArgumentParse(StringView op, StringView option, String& v, v_type arg) {
+inline void Engine::setArgumentParse(StringView op, StringView option, String& v, v_type arg) {
 	v = std::visit([](auto& x) {
 		return Format(x);
 	}, arg);
 }
 
-void Test2::readSetting() {
+void Engine::readSetting() {
 	TextReader reader{ settingfile };
 	if (!reader) {
 		throw Error{ U"Failed to open setting file." };
@@ -182,17 +186,17 @@ void Test2::readSetting() {
 	}
 }
 
-void Test2::readScriptLine(String& s) {
+void Engine::readScriptLine(String& s) {
 	if (scriptIndex >= scriptLines.size()) {
 		s = U"";
 		readStopFlag = true;
 		return;
 	}
-	s = scriptLines.at(scriptIndex);
+	s = scriptLines.at(scriptIndex).first;
 	scriptIndex++;
 }
 
-void Test2::readScript() {
+void Engine::readScript() {
 	String line;
 	readStopFlag = false;
 
@@ -302,7 +306,8 @@ void Test2::readScript() {
 		U"setting", U"start", U"name",
 		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
 		U"music", U"sound",
-		U"wait", U"goto", U"scenechange", U"call", U"exit"
+		U"wait", U"goto", U"scenechange", U"exit",
+		U"inculude", U"call"
 	};
 	String proc = U"";
 	for (auto [j, p] : Indexed(pn)) {
@@ -848,7 +853,7 @@ void Test2::readScript() {
 
 					std::function<bool()> f = [&, this, dst = d]() {
 						for (auto [i, l] : Indexed(scriptLines)) {
-							const auto skip = RegExp(U"@(.+)").search(l);
+							const auto skip = RegExp(U"@(.+)").search(l.first);
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == dst) {
 									scriptIndex = i + 1;
@@ -878,11 +883,15 @@ void Test2::readScript() {
 
 					std::function<bool()> f = [&, this, file = fp, dur = d]() {
 						getData().scriptPath = file;
-						changeScene(GameScene::Test2, dur * 1.0s);
+						changeScene(GameScene::Engine, dur * 1.0s);
 						return true;
 					};
 
 					setMainProcess(f);
+				}
+
+				if (op == U"include") {
+
 				}
 
 				/* マクロ挿入用、readScript()の処理を変える必要があるので後回し
@@ -1092,7 +1101,7 @@ void Test2::readScript() {
 
 						// 指定箇所までスキップ
 						for (auto [i, l] : Indexed(scriptLines)) {
-							const auto skip = RegExp(U"@(.+)").search(l);
+							const auto skip = RegExp(U"@(.+)").search(l.first);
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == itr->dst) {
 									scriptIndex = i + 1;
@@ -1115,7 +1124,7 @@ void Test2::readScript() {
 	}
 }
 
-void Test2::interprete(String code) {
+void Engine::interprete(String code) {
 	auto tokens = Lexer().init(code).tokenize();
 	auto blk = Parser().init(tokens).block();
 	auto[v, sv] = Interpreter().init(blk, this->vars, getData().systemVars).run();
@@ -1123,13 +1132,13 @@ void Test2::interprete(String code) {
 	getData().systemVars = sv;
 }
 
-std::any Test2::getValueFromVariable(String var) {
+std::any Engine::getValueFromVariable(String var) {
 	auto tokens = Lexer().init(var).tokenize();
 	auto blk = Parser().init(tokens).block();
 	return Interpreter().init(blk, this->vars, getData().systemVars).getValue();
 }
 
-bool Test2::boolCheck(std::any value) {
+bool Engine::boolCheck(std::any value) {
 	if (auto p = std::any_cast<int32>(&value)) {
 		return *p != 0;
 	}
@@ -1141,7 +1150,7 @@ bool Test2::boolCheck(std::any value) {
 	}
 }
 
-void Test2::resetTextWindow(Array<String> strs) {
+void Engine::resetTextWindow(Array<String> strs) {
 	for (auto itr = strs.begin(); itr != strs.end(); ++itr) {
 		scenarioLog << *itr;
 	}
@@ -1150,7 +1159,7 @@ void Test2::resetTextWindow(Array<String> strs) {
 	nowWindowText = WindowText{};
 }
 
-void Test2::setSaveVariable() {
+void Engine::setSaveVariable() {
 	forSaveIndex = scriptIndex;
 
 	Array<Graphic> saveGraphics = {};
@@ -1162,7 +1171,7 @@ void Test2::setSaveVariable() {
 	forSaveGraphics = saveGraphics;
 }
 
-void Test2::update() {
+void Engine::update() {
 	// Printをクリア
 	ClearPrint();
 
@@ -1336,11 +1345,11 @@ void Test2::update() {
 	*/
 
 	if (KeyR.down()) {
-		changeScene(GameScene::Test2);
+		changeScene(GameScene::Engine);
 	}
 }
 
-void Test2::draw() const {
+void Engine::draw() const {
 	if (isShowingLog) {
 		Print << U"Log";
 		for (auto itr = scenarioLog.begin(); itr != scenarioLog.end(); ++itr) {
@@ -1410,7 +1419,7 @@ void Test2::draw() const {
 	fadeProcess();
 }
 
-String Test2::getVariableList(std::any arg) const {
+String Engine::getVariableList(std::any arg) const {
 	if (auto p = std::any_cast<int32>(&arg)) {
 		return Format(*p);
 	}
@@ -1436,9 +1445,9 @@ String Test2::getVariableList(std::any arg) const {
 	}
 }
 
-void Test2::Graphic::update() {}
+void Engine::Graphic::update() {}
 
-void Test2::Graphic::draw() const {
+void Engine::Graphic::draw() const {
 	if (nextTexture) {
 		texture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
 		nextTexture.resized(size).scaled(scale).draw(position, ColorF{ 1.0, 1.0 - opacity });
@@ -1448,7 +1457,7 @@ void Test2::Graphic::draw() const {
 	}
 }
 
-void Test2::Button::update() {
+void Engine::Button::update() {
 	if (Rect{ position.asPoint(), size }.mouseOver()) {
 		Cursor::RequestStyle(CursorStyle::Hand);
 	}
@@ -1468,7 +1477,7 @@ void Test2::Button::update() {
 	}
 }
 
-void Test2::Button::draw() const {
+void Engine::Button::draw() const {
 	TextureRegion tr;
 	if (click && region().leftPressed()) {
 		tr = click.resized(size);

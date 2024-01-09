@@ -13,7 +13,7 @@ Initialize::Initialize(const InitData& init) : IScene{ init } {
 }
 
 void Initialize::update() {
-	changeScene(GameScene::Test2, 0.0s);
+	changeScene(GameScene::Engine, 0.0s);
 }
 
 void Initialize::draw() const {

@@ -2,7 +2,7 @@
 #include "GameScene.hpp"
 
 #include "Initialize.hpp"
-#include "Test2.hpp"
+#include "Engine.hpp"
 
 
 void registerFontAsset() {
@@ -31,7 +31,7 @@ void Main() {
 
 	GameManager manager;
 	manager.add<Initialize>(GameScene::Initialize);
-	manager.add<Test2>(GameScene::Test2);
+	manager.add<Engine>(GameScene::Engine);
 
 	manager.init(GameScene::Initialize);
 

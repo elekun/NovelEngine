@@ -7,9 +7,9 @@
 #include "Interpreter.hpp"
 
 
-class Test2 : public GameManager::Scene {
+class Engine : public GameManager::Scene {
 public:
-	Test2(const InitData& init);
+	Engine(const InitData& init);
 	void update() override;
 	void draw() const override;
 
@@ -50,7 +50,7 @@ private:
 
 
 	// スクリプト用変数
-	Array<String> scriptLines;
+	Array<std::pair<String, FilePath>> scriptLines;
 	size_t scriptIndex;
 	bool readStopFlag;
 
@@ -142,13 +142,13 @@ private:
 		FilePath clickPath;
 		Texture nextClick;
 		FilePath nextClickPath;
-		Test2* engine;
+		Engine* engine;
 		String expr; // クリック時に動作するスクリプト
 		String role; // 特殊機能
 
 	public:
 		Button() : Graphic{} {};
-		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, Test2* en) :
+		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, Engine* en) :
 			hoverPath(h), clickPath(c), expr(e), role(r), engine(en), Graphic{n, p, s, sc, o, l, t} {};
 
 		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };

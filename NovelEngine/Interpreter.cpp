@@ -50,14 +50,14 @@ String Println::getPrintString(std::any arg) {
 		return Format(*p);
 	}
 	else if (auto p = std::any_cast<Array<std::any>>(&arg)) {
-		String s = U"{";
+		String s = U"[";
 		for (int32 i = 0; i < p->size(); i++) {
 			s += getPrintString(p->at(i));
 			if (i < p->size() - 1) {
 				s += U",";
 			}
 		}
-		s += U"}";
+		s += U"]";
 		return s;
 	}
 	else {
