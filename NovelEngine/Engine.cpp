@@ -23,7 +23,7 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 		throw Error{ U"Failed to open `{}`"_fmt(getData().scriptPath) };
 	}
 	scriptStack = {};
-	scriptStack << ScriptData{reader, 0};
+	scriptStack << ScriptData{reader, 0, 0};
 
 	readStopFlag = false;
 
@@ -1259,6 +1259,7 @@ void Engine::update() {
 		}
 		writer(scriptPathList);
 		writer(scriptSaveIndexList);
+		Console << scriptSaveIndexList;
 
 		writer(operateLine);
 		writer(nowName);
@@ -1313,6 +1314,7 @@ void Engine::update() {
 		Array<size_t> scriptSaveIndexList;
 		reader(scriptPathList);
 		reader(scriptSaveIndexList);
+		Console << scriptSaveIndexList;
 		for (auto i : step(scriptPathList.size())) {
 			TextReader tr{ scriptPathList[i] };
 			size_t index = scriptSaveIndexList[i];
