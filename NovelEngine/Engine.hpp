@@ -50,8 +50,13 @@ private:
 
 
 	// スクリプト用変数
-	Array<std::pair<String, FilePath>> scriptLines;
-	size_t scriptIndex;
+	struct ScriptData {
+		ScriptData(TextReader tr, size_t i) : reader(tr), index(i) {};
+		TextReader reader;
+		size_t index;
+	};
+	Array<ScriptData> scriptStack;
+
 	bool readStopFlag;
 
 	void readScriptLine(String& s);
@@ -215,7 +220,7 @@ private:
 
 	// データセーブ用
 	FilePath savefile;
-	size_t forSaveIndex; // セーブするスクリプトの行番号, メイン処理のうち前に実行したもの
+	// size_t forSaveIndex; // セーブするスクリプトの行番号, メイン処理のうち前に実行したもの
 	Array<Graphic> forSaveGraphics;
 	void setSaveVariable();
 

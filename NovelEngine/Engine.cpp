@@ -22,14 +22,9 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 	if (!reader) {
 		throw Error{ U"Failed to open `{}`"_fmt(getData().scriptPath) };
 	}
+	scriptStack = {};
+	scriptStack << ScriptData{reader, 0};
 
-	scriptLines = {};
-	for (auto l : reader.readLines()) {
-		scriptLines << std::make_pair(l, getData().scriptPath);
-	}
-
-	scriptIndex = 0;
-	forSaveIndex = 0;
 	readStopFlag = false;
 
 
@@ -187,13 +182,14 @@ void Engine::readSetting() {
 }
 
 void Engine::readScriptLine(String& s) {
-	if (scriptIndex >= scriptLines.size()) {
+	if (scriptStack.back().reader.readLine(s)) {
+		scriptStack.back().index++;
+	}
+	else {
 		s = U"";
 		readStopFlag = true;
 		return;
 	}
-	s = scriptLines.at(scriptIndex).first;
-	scriptIndex++;
 }
 
 void Engine::readScript() {
@@ -850,17 +846,31 @@ void Engine::readScript() {
 							setArgument(op, option, d, arg);
 						}
 					}
+					FilePath fp = scriptStack.back().reader.path();
 
-					std::function<bool()> f = [&, this, dst = d]() {
-						for (auto [i, l] : Indexed(scriptLines)) {
-							const auto skip = RegExp(U"@(.+)").search(l.first);
+					std::function<bool()> f = [&, this, dst = d, path = fp]() {
+						TextReader reader{ path };
+						if (!reader) {
+							throw Error{U"Failed to open `{}`"_fmt(path)};
+						}
+
+						String line;
+						size_t i = 0;
+						bool flag = false;
+						while (reader.readLine(line)) {
+							i++;
+							const auto skip = RegExp(U" *@(.+) *").match(line);
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == dst) {
-									scriptIndex = i + 1;
-
+									scriptStack.pop_back();
+									scriptStack << ScriptData{reader, i};
+									flag = true;
 								}
 							}
 						}
+
+						if (!flag) throw Error{U"Not exist `@{}`"_fmt(dst)};
+
 						return true;
 					};
 
@@ -1099,15 +1109,26 @@ void Engine::readScript() {
 						setSaveVariable();
 						isShowSelection = false;
 
-						// 指定箇所までスキップ
-						for (auto [i, l] : Indexed(scriptLines)) {
-							const auto skip = RegExp(U"@(.+)").search(l.first);
+						FilePath fp = scriptStack.back().reader.path();
+						TextReader reader{ fp };
+						if (!reader) throw Error{U"Failed to open `{}`"_fmt(fp)};
+
+						String line;
+						size_t i = 0;
+						bool flag = false;
+						while (reader.readLine(line)) {
+							i++;
+							const auto skip = RegExp(U" *@(.+) *").match(line);
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == itr->dst) {
-									scriptIndex = i + 1;
+									scriptStack.pop_back();
+									scriptStack << ScriptData{reader, i};
+									flag = true;
 								}
 							}
 						}
+
+						if(!flag) throw Error{U"Not exist `@{}`"_fmt(itr->dst)};
 
 						selections.clear();
 						return true;
@@ -1160,8 +1181,6 @@ void Engine::resetTextWindow(Array<String> strs) {
 }
 
 void Engine::setSaveVariable() {
-	forSaveIndex = scriptIndex;
-
 	Array<Graphic> saveGraphics = {};
 	for (auto g : graphics) {
 		if (typeid((*g)) == typeid(Graphic)) {
@@ -1226,7 +1245,17 @@ void Engine::update() {
 		Serializer<BinaryWriter> writer{ savefile };
 		if (!writer) throw Error{U"Failed to open SaveFile"};
 
-		writer(forSaveIndex);
+		// script
+		// writer(forSaveIndex);
+		Array<FilePath> scriptPathList;
+		Array<size_t> scriptIndexList;
+		for (auto s : scriptStack) {
+			scriptPathList << s.reader.path();
+			scriptIndexList << s.index;
+		}
+		writer(scriptPathList);
+		writer(scriptIndexList);
+
 		writer(operateLine);
 		writer(nowName);
 
@@ -1275,7 +1304,23 @@ void Engine::update() {
 		Deserializer<BinaryReader> reader{ savefile };
 		if (!reader) throw Error{ U"Failed to open SaveFile" };
 
-		reader(scriptIndex);
+		scriptStack = {};
+		Array<FilePath> scriptPathList;
+		Array<size_t> scriptIndexList;
+		reader(scriptPathList);
+		reader(scriptIndexList);
+		for (auto i : step(scriptPathList.size())) {
+			TextReader tr{ scriptPathList[i] };
+			size_t index = scriptIndexList[i];
+			if (!tr) throw Error{ U"Failed to open `{}`"_fmt(scriptPathList[i]) };
+
+			for (auto j : step(index)) {
+				tr.readLine();
+			}
+
+			scriptStack << ScriptData{tr, index};
+		}
+
 		reader(operateLine);
 		reader(nowName);
 
