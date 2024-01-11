@@ -27,8 +27,7 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 
 	readStopFlag = false;
 
-
-	mainProcess = [&, this]() { return true; };
+	initMainProcess();
 	fadeProcess = [&, this]() {};
 
 	nowName = U"";
@@ -186,9 +185,14 @@ void Engine::readScriptLine(String& s) {
 		scriptStack.back().index++;
 	}
 	else {
-		s = U"";
-		readStopFlag = true;
-		return;
+		scriptStack.pop_back();
+		if (!scriptStack.isEmpty()) {
+			readScriptLine(s);
+		}
+		else {
+			s = U"";
+			readStopFlag = true;
+		}
 	}
 }
 
@@ -871,6 +875,7 @@ void Engine::readScript() {
 
 						if (!flag) throw Error{U"Not exist `@{}`"_fmt(dst)};
 
+						initMainProcess();
 						return true;
 					};
 
@@ -893,6 +898,7 @@ void Engine::readScript() {
 
 					std::function<bool()> f = [&, this, file = fp, dur = d]() {
 						getData().scriptPath = file;
+						readStopFlag = true;
 						changeScene(GameScene::Engine, dur * 1.0s);
 						return true;
 					};
@@ -1121,6 +1127,7 @@ void Engine::readScript() {
 							const auto skip = RegExp(U" *@(.+) *").match(line);
 							if (!skip.isEmpty()) {
 								if (skip[1].value() == itr->dst) {
+									Console << U"found";
 									scriptStack.pop_back();
 									scriptStack << ScriptData{reader, i, i};
 									flag = true;
@@ -1169,6 +1176,10 @@ bool Engine::boolCheck(std::any value) {
 	else {
 		throw Error{U"boolCheck Error"};
 	}
+}
+
+void Engine::initMainProcess() {
+	mainProcess = [&, this]() { return true; };
 }
 
 void Engine::resetTextWindow(Array<String> strs) {

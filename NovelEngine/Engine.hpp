@@ -70,6 +70,7 @@ private:
 	std::function<bool()> mainProcess;
 	Array<std::function<bool()>> subProcesses; // サブ処理のリスト
 	String operateLine;
+	void initMainProcess();
 
 	InputGroup proceedInput;
 
