@@ -314,7 +314,6 @@ void Engine::readScript() {
 	// 文章を読み込む処理
 	do {
 		readScriptLine(line);
-		// Console << line;
 
 		// コード部分なら一気に読み込んで行く
 		// 複数行
@@ -342,9 +341,11 @@ void Engine::readScript() {
 		}
 
 		// # 始まりと @ 始まりの行は特殊文として処理
-		auto tmp = RegExp(U" *[#@](.*)").match(line);
-		if (!tmp.isEmpty()) {
-			operateLine = tmp[1].value();
+		if (auto tmp_op = RegExp(U" *#(.*)").match(line)) {
+			operateLine = tmp_op[1].value();
+		}
+		else if (auto tmp_op = RegExp(U" *@(.*)").match(line)) {
+			// dst
 		}
 		else if(line != U"") {
 			sentenceStorage += line + U"\n";
@@ -421,7 +422,6 @@ void Engine::readScript() {
 
 								scriptStack.pop_back();
 								scriptStack << ScriptData{reader, i, i};
-								//scriptStack >> [](ScriptData sd) { Console << sd.reader.path(); };
 
 								selections.clear();
 								return true;
@@ -440,9 +440,7 @@ void Engine::readScript() {
 
 		// 各種処理
 		if (operateLine != U"") {
-
-			const auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).search(operateLine);
-			if (!operate.isEmpty()) {
+			if (auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).match(operateLine)) {
 
 				StringView op = operate[1].value(); // 処理のタグ
 				Array<std::pair<String, v_type>> args = getArgs(operate[2].value());
@@ -1159,7 +1157,6 @@ void Engine::initMainProcess() {
 
 bool Engine::exeMainProcess() {
 	if ((mainProcess.front())()) {
-		Console << mainProcess.size();
 		mainProcess.pop_front();
 	}
 	return mainProcess.isEmpty();
