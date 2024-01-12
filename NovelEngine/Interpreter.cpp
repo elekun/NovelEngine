@@ -126,6 +126,14 @@ std::any Interpreter::getValue() {
 	return value(expression(expr));
 }
 
+bool Interpreter::evalExpression() {
+	if (body.size() != 1) {
+		throw Error{U"getValue error"};
+	}
+	auto expr = body[0];
+	return isTrue(calc(expr));
+}
+
 std::any Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk) {
 	for (auto expr : b) {
 		if (expr->kind == U"if") {

@@ -54,6 +54,9 @@ private:
 	void interprete(String code);
 	std::any getValueFromVariable(String var);
 	bool boolCheck(std::any value);
+	bool evalExpression(String expr);
+	bool ifSkipFlag;
+	void skipLineForIf();
 
 	// 全処理共通変数
 	Array<std::function<bool()>> mainProcess; // メイン処理のキュー

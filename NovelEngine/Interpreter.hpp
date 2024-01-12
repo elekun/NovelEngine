@@ -70,6 +70,7 @@ public:
 	Interpreter& init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs, HashTable<String, shared_ptr<Variable>> svs);
 	std::tuple<HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>> run();
 	std::any getValue();
+	bool evalExpression();
 	std::any process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk);
 	std::any expression(shared_ptr<Token> expr);
 	int32 digit(shared_ptr<Token> token);

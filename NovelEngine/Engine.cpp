@@ -303,7 +303,8 @@ void Engine::readScript() {
 		U"music", U"sound",
 		U"wait", U"goto", U"scenechange", U"exit",
 		U"choice",
-		U"inculude", U"call", U"return"
+		U"inculude", U"call", U"return",
+		U"if", U"elif", U"else",U"endif"
 	};
 	String proc = U"";
 	for (auto [j, p] : Indexed(pn)) {
@@ -1030,6 +1031,53 @@ void Engine::readScript() {
 					setMainProcess(f);
 				}
 
+				if (op == U"if") {
+					ifSkipFlag = false;
+
+					String e;
+					for (auto [option, arg] : args) {
+						if (option == U"exp") {
+							setArgument(op, option, e, arg);
+						}
+					}
+
+					if (evalExpression(e)) {
+						ifSkipFlag = true;
+					}
+					else {
+						skipLineForIf();
+					}
+				}
+
+				if (op == U"elif") {
+					String e;
+					for (auto [option, arg] : args) {
+						if (option == U"exp") {
+							setArgument(op, option, e, arg);
+						}
+					}
+
+					if (!ifSkipFlag && evalExpression(e)) {
+						ifSkipFlag = true;
+					}
+					else {
+						skipLineForIf();
+					}
+				}
+
+				if (op == U"else") {
+					if (!ifSkipFlag) {
+						ifSkipFlag = true;
+					}
+					else {
+						skipLineForIf();
+					}
+				}
+
+				if (op == U"endif") {
+					ifSkipFlag = false;
+				}
+
 				if (op == U"scenechange") {
 					// filename
 					FilePath fp;
@@ -1148,6 +1196,32 @@ bool Engine::boolCheck(std::any value) {
 	}
 	else {
 		throw Error{U"boolCheck Error"};
+	}
+}
+
+bool Engine::evalExpression(String expr) {
+	auto tokens = Lexer().init(expr).tokenize();
+	auto blk = Parser().init(tokens).block();
+	return Interpreter().init(blk, this->vars, getData().systemVars).evalExpression();
+}
+
+void Engine::skipLineForIf() {
+	TextReader reader{ scriptStack.back().reader.path() };
+	String line;
+	size_t i = 0;
+	for (size_t j = 0; reader.readLine(line); j++) {
+		if (j < scriptStack.back().index) continue;
+
+		auto skip = RegExp(U" *#(elif|else|endif).+").match(line);
+		if (!skip.isEmpty()) {
+			break;
+		}
+		i++;
+	}
+
+	String skipLine;
+	for (; i > 0; i--) {
+		readScriptLine(skipLine);
 	}
 }
 
