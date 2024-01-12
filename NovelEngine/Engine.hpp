@@ -62,6 +62,7 @@ private:
 
 	void readScriptLine(String& s);
 	void readScript();
+	std::pair<TextReader, int32> getDistination(FilePath path, String dst);
 	void interprete(String code);
 	std::any getValueFromVariable(String var);
 	bool boolCheck(std::any value);

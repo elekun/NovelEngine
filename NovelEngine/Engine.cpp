@@ -181,18 +181,18 @@ void Engine::readSetting() {
 }
 
 void Engine::readScriptLine(String& s) {
+	if (scriptStack.isEmpty()) {
+		s = U"";
+		readStopFlag = true;
+		return;
+	}
+
 	if (scriptStack.back().reader.readLine(s)) {
 		scriptStack.back().index++;
 	}
 	else {
 		scriptStack.pop_back();
-		if (!scriptStack.isEmpty()) {
-			readScriptLine(s);
-		}
-		else {
-			s = U"";
-			readStopFlag = true;
-		}
+		readScriptLine(s);
 	}
 }
 
@@ -306,8 +306,8 @@ void Engine::readScript() {
 		U"setting", U"start", U"name",
 		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
 		U"music", U"sound",
-		U"wait", U"goto", U"scenechange", U"exit",
-		U"inculude", U"call"
+		U"wait", U"choice", U"goto", U"scenechange", U"exit",
+		U"inculude", U"call", U"return"
 	};
 	String proc = U"";
 	for (auto [j, p] : Indexed(pn)) {
@@ -842,38 +842,27 @@ void Engine::readScript() {
 					setMainProcess(f());
 				}
 
+				if (op == U"choice") {
+
+				}
+
 				if (op == U"goto") {
 					// distination
+					FilePath fp = scriptStack.back().reader.path();
 					String d;
 					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
 						if (option == U"dst") {
 							setArgument(op, option, d, arg);
 						}
 					}
-					FilePath fp = scriptStack.back().reader.path();
 
-					std::function<bool()> f = [&, this, dst = d, path = fp]() {
-						TextReader reader{ path };
-						if (!reader) {
-							throw Error{U"Failed to open `{}`"_fmt(path)};
-						}
-
-						String line;
-						size_t i = 0;
-						bool flag = false;
-						while (reader.readLine(line)) {
-							i++;
-							const auto skip = RegExp(U" *@(.+) *").match(line);
-							if (!skip.isEmpty()) {
-								if (skip[1].value() == dst) {
-									scriptStack.pop_back();
-									scriptStack << ScriptData{reader, i, i};
-									flag = true;
-								}
-							}
-						}
-
-						if (!flag) throw Error{U"Not exist `@{}`"_fmt(dst)};
+					std::function<bool()> f = [&, this, path = fp, dst = d]() {
+						auto [reader, i] = getDistination(path, dst);
+						scriptStack.pop_back();
+						scriptStack << ScriptData{reader, i, i};
 
 						initMainProcess();
 						return true;
@@ -898,7 +887,6 @@ void Engine::readScript() {
 
 					std::function<bool()> f = [&, this, file = fp, dur = d]() {
 						getData().scriptPath = file;
-						readStopFlag = true;
 						changeScene(GameScene::Engine, dur * 1.0s);
 						return true;
 					};
@@ -910,22 +898,31 @@ void Engine::readScript() {
 
 				}
 
-				/* マクロ挿入用、readScript()の処理を変える必要があるので後回し
-				* 1. struct{scriptIndex, scriptLines} の配列を作成
-				* 2. スタック（First in Last out）でscriptLinesにアクセス、処理を実行
-				* 3. 最後まで行ったらスタックから出す
-				*/
 				if (op == U"call") {
 					// filename
-					FilePath fp;
+					FilePath fp = scriptStack.back().reader.path();
+					String d;
 					for (auto [option, arg] : args) {
 						if (option == U"path") {
 							setArgument(op, option, fp, arg);
+						}
+						if (option == U"dst") {
+							setArgument(op, option, d, arg);
 						}
 					}
 
 					std::function<bool()> f = [&, this, file = fp]() {
 						readScript();
+						return true;
+					};
+
+					setMainProcess(f);
+				}
+
+				if (op == U"return") {
+					std::function<bool()> f = [&, this]() {
+						scriptStack.pop_back();
+						readStopFlag = false;
 						return true;
 					};
 
@@ -1064,6 +1061,9 @@ void Engine::readScript() {
 					if (option == U"dst") {
 						setArgument(U"choice", option, dst, arg);
 					}
+					if (option == U"dst") {
+						setArgument(U"choice", option, dst, arg);
+					}
 					if (option == U"type") {
 						setArgument(U"choice", option, type, arg);
 					}
@@ -1116,26 +1116,11 @@ void Engine::readScript() {
 						isShowSelection = false;
 
 						FilePath fp = scriptStack.back().reader.path();
-						TextReader reader{ fp };
-						if (!reader) throw Error{U"Failed to open `{}`"_fmt(fp)};
+						auto [reader, i] = getDistination(fp, itr->dst);
 
-						String line;
-						size_t i = 0;
-						bool flag = false;
-						while (reader.readLine(line)) {
-							i++;
-							const auto skip = RegExp(U" *@(.+) *").match(line);
-							if (!skip.isEmpty()) {
-								if (skip[1].value() == itr->dst) {
-									Console << U"found";
-									scriptStack.pop_back();
-									scriptStack << ScriptData{reader, i, i};
-									flag = true;
-								}
-							}
-						}
-
-						if(!flag) throw Error{U"Not exist `@{}`"_fmt(itr->dst)};
+						scriptStack.pop_back();
+						scriptStack << ScriptData{reader, i, i};
+						//scriptStack >> [](ScriptData sd) { Console << sd.reader.path(); };
 
 						selections.clear();
 						return true;
@@ -1150,6 +1135,28 @@ void Engine::readScript() {
 		};
 		setMainProcess(f());
 	}
+}
+
+std::pair<TextReader, int32> Engine::getDistination(FilePath path, String dst) {
+	TextReader reader{ path };
+	if (!reader) throw Error{U"Failed to open `{}`"_fmt(path)};
+
+	String line;
+	size_t i = 0;
+	bool flag = false;
+	while (reader.readLine(line)) {
+		i++;
+		const auto skip = RegExp(U" *@(.+) *").match(line);
+		if (!skip.isEmpty()) {
+			if (skip[1].value() == dst) {
+				flag = true;
+				break;
+			}
+		}
+	}
+	if (!flag) throw Error{U"Not exist `@{}`"_fmt(dst)};
+
+	return std::make_pair(reader, i);
 }
 
 void Engine::interprete(String code) {
