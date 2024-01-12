@@ -14,16 +14,6 @@ public:
 	void draw() const override;
 
 private:
-
-	size_t effectIndex;
-	MSRenderTexture renderTexture;
-
-	struct EffectSetting {
-		float level;
-	};
-	ConstantBuffer<EffectSetting> cb;
-
-
 	// ゲーム内変数
 	HashTable<String, shared_ptr<Variable>> vars;
 	v_type stringToVariable(String type = U"string", String v = U"");
@@ -46,8 +36,6 @@ private:
 	Rect textRect;
 	void readSetting();
 
-	bool isAuto;
-
 
 	// スクリプト用変数
 	struct ScriptData {
@@ -62,16 +50,17 @@ private:
 
 	void readScriptLine(String& s);
 	void readScript();
-	std::pair<TextReader, int32> getDistination(FilePath path, String dst);
+	std::pair<TextReader, size_t> getDistination(FilePath path, String dst);
 	void interprete(String code);
 	std::any getValueFromVariable(String var);
 	bool boolCheck(std::any value);
 
 	// 全処理共通変数
-	std::function<bool()> mainProcess;
+	Array<std::function<bool()>> mainProcess; // メイン処理のキュー
 	Array<std::function<bool()>> subProcesses; // サブ処理のリスト
 	String operateLine;
 	void initMainProcess();
+	bool exeMainProcess();
 
 	InputGroup proceedInput;
 

@@ -13,11 +13,6 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 
 	Console << U"script path :" << getData().scriptPath;
 
-	effectIndex = 0;
-	renderTexture = MSRenderTexture{ Scene::Size() };
-
-	cb->level = 0.1;
-
 	TextReader reader{ getData().scriptPath };
 	if (!reader) {
 		throw Error{ U"Failed to open `{}`"_fmt(getData().scriptPath) };
@@ -297,7 +292,7 @@ void Engine::readScript() {
 	};
 
 	auto setMainProcess = [&, this](std::function<bool()> f) {
-		mainProcess = f;
+		mainProcess << f;
 		readStopFlag = true;
 	};
 
@@ -306,7 +301,8 @@ void Engine::readScript() {
 		U"setting", U"start", U"name",
 		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
 		U"music", U"sound",
-		U"wait", U"choice", U"goto", U"scenechange", U"exit",
+		U"wait", U"goto", U"scenechange", U"exit",
+		U"choice",
 		U"inculude", U"call", U"return"
 	};
 	String proc = U"";
@@ -317,13 +313,138 @@ void Engine::readScript() {
 
 	// 文章を読み込む処理
 	do {
+		readScriptLine(line);
+		// Console << line;
+
+		// コード部分なら一気に読み込んで行く
+		// 複数行
+		if (RegExp(U" *```.*").fullMatch(line)) {
+			String code = String{ RegExp(U" *```(.*)").search(line)[1].value() };
+			bool isCodeLine = true;
+			while (isCodeLine) {
+				readScriptLine(line);
+				if (RegExp(U".*``` *").fullMatch(line)) {
+					code += String{ RegExp(U"(.*)``` *").search(line)[1].value() };
+					isCodeLine = false;
+				}
+				else {
+					code += line + U" ";
+				}
+			}
+			interprete(code);
+			line = U"";
+		}
+		// 1行
+		if (RegExp(U" *`([^`]*)` *").fullMatch(line)) {
+			String code = String{ RegExp(U" *`([^`]*)` *").match(line)[1].value() };
+			interprete(code);
+			line = U"";
+		}
+
+		// # 始まりと @ 始まりの行は特殊文として処理
+		auto tmp = RegExp(U" *[#@](.*)").match(line);
+		if (!tmp.isEmpty()) {
+			operateLine = tmp[1].value();
+		}
+		else if(line != U"") {
+			sentenceStorage += line + U"\n";
+		}
+		else {
+			// 文章表示
+			if (sentenceStorage != U"") {
+				nowWindowText.sentence = eraseBackChar(sentenceStorage, U'\n'); // 末尾の改行を削除
+				nowWindowText.indexCT = 0.05;
+
+				std::function<bool()> f = [&, this]() {
+
+					nowWindowText.time += Scene::DeltaTime();
+
+					if (getData().isAuto) {
+						if (nowWindowText.time >= nowWindowText.indexCT * 20) {
+							resetTextWindow({ nowWindowText.sentence });
+							setSaveVariable();
+							return true;
+						}
+					}
+					else {
+						// 左クリックorスペースで
+						if (proceedInput.down()) {
+							// 最後まで文字が表示されているなら次に行く
+							if (nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+								resetTextWindow({ nowWindowText.sentence });
+								setSaveVariable();
+								return true;
+							}
+							// まだ最後まで文字が表示されていないなら最後まで全部出す
+							else {
+								nowWindowText.index = nowWindowText.sentence.size() - 1;
+							}
+						}
+					}
+
+					// 選択肢が用意されているときの処理
+					// 文字が最後まで表示されたら
+					if (!selections.isEmpty() && nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+						// 選択肢を表示しておく
+						isShowSelection = true;
+						return true;
+					}
+
+					// 1文字ずつ順番に表示する
+					if (nowWindowText.time >= nowWindowText.indexCT) {
+						if (nowWindowText.index < nowWindowText.sentence.size() - 1) {
+							nowWindowText.index++;
+							nowWindowText.time = 0;
+						}
+					}
+
+					return false;
+				};
+				setMainProcess(f);
+			}
+			// 選択肢表示
+			if (!selections.isEmpty()) {
+				if (nowWindowText.sentence == U"") {
+					isShowSelection = true;
+				}
+				std::function<std::function<bool()>()> f = [&, this]() {
+					bool isClicked = false;
+					return [&, this]() mutable {
+						for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
+							if (Rect{ itr->pos, itr->size }.leftReleased() && isClicked) {
+								resetTextWindow({ nowWindowText.sentence, U"choiced : " + itr->text });
+								setSaveVariable();
+								isShowSelection = false;
+
+								FilePath fp = scriptStack.back().reader.path();
+								auto [reader, i] = getDistination(fp, itr->dst);
+
+								scriptStack.pop_back();
+								scriptStack << ScriptData{reader, i, i};
+								//scriptStack >> [](ScriptData sd) { Console << sd.reader.path(); };
+
+								selections.clear();
+								return true;
+							}
+							if (Rect{ itr->pos, itr->size }.leftClicked()) {
+								isClicked = true;
+							}
+						}
+
+						return false;
+					};
+				};
+				setMainProcess(f());
+			}
+		}
+
 		// 各種処理
 		if (operateLine != U"") {
 
 			const auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).search(operateLine);
 			if (!operate.isEmpty()) {
 
-				StringView op =	operate[1].value(); // 処理のタグ
+				StringView op = operate[1].value(); // 処理のタグ
 				Array<std::pair<String, v_type>> args = getArgs(operate[2].value());
 
 				if (op == U"setting") {
@@ -356,7 +477,7 @@ void Engine::readScript() {
 					fadeProcess = [&, this]() {
 						Rect{ Point::Zero(), Scene::Size() }.draw(ColorF{ 0.0, 0.0, 0.0, 1.0 - sceneFade });
 					};
-					
+
 					std::function<std::function<bool()>()> f = [&, this, _d = d]() {
 						double time = 0.0;
 
@@ -843,7 +964,47 @@ void Engine::readScript() {
 				}
 
 				if (op == U"choice") {
+					String text;
+					String dst;
+					String type;
+					Point pos = Point{ 0, 0 };
+					Point size = Point{ 0, 0 };
+					String normal = U"", hover = U"", click = U"";
 
+					// 引数を処理
+					for (auto [option, arg] : args) {
+						if (option == U"text") {
+							setArgument(op, option, text, arg);
+						}
+						if (option == U"dst") {
+							setArgument(op, option, dst, arg);
+						}
+						if (option == U"type") {
+							setArgument(op, option, type, arg);
+						}
+						if (option == U"pos") {
+							setArgument(op, option, pos, arg);
+						}
+						if (option == U"size") {
+							setArgument(op, option, size, arg);
+						}
+						if (option == U"normal") {
+							setArgument(op, option, normal, arg);
+						}
+						if (option == U"hover") {
+							setArgument(op, option, hover, arg);
+						}
+						if (option == U"click") {
+							setArgument(op, option, click, arg);
+						}
+
+					}
+					Choice choice;
+					if (type == U"image") {
+						choice = Choice{ text, dst, type, pos, size, normal, hover, click };
+					}
+
+					selections.emplace_back(choice);
 				}
 
 				if (op == U"goto") {
@@ -941,203 +1102,10 @@ void Engine::readScript() {
 			operateLine = U"";
 		}
 
-
-		readScriptLine(line);
-
-		// コード部分なら一気に読み込んで行く
-		// 複数行
-		if (RegExp(U" *```.*").fullMatch(line)) {
-			String code = String{ RegExp(U" *```(.*)").search(line)[1].value() };
-			bool isCodeLine = true;
-			while (isCodeLine) {
-				readScriptLine(line);
-				if (RegExp(U".*``` *").fullMatch(line)) {
-					code += String{ RegExp(U"(.*)``` *").search(line)[1].value() };
-					isCodeLine = false;
-				}
-				else {
-					code += line + U" ";
-				}
-			}
-			interprete(code);
-			line = U"";
-		}
-		// 1行
-		if (RegExp(U" *`([^`]*)` *").fullMatch(line)) {
-			String code = String{ RegExp(U" *`([^`]*)` *").match(line)[1].value() };
-			interprete(code);
-			line = U"";
-		}
-
-		// # 始まりと @ 始まりの行は特殊文として処理
-		auto tmp = RegExp(U" *[#@](.*)").search(line);
-
-		// 処理が挟まるか空行ならひとかたまりの文章として処理
-		if (!tmp.isEmpty() || line == U"") {
-			if (!tmp.isEmpty()) {
-				operateLine = tmp[1].value();
-			}
-
-			if (sentenceStorage != U"") {
-				if (sentenceStorage.back() == '\n') {
-					nowWindowText.sentence = sentenceStorage.substr(0, sentenceStorage.size() - 1); // 改行削除
-				}
-				nowWindowText.indexCT = 0.05;
-
-				std::function<bool()> f = [&, this]() {
-
-					nowWindowText.time += Scene::DeltaTime();
-
-					if (getData().isAuto) {
-						if (nowWindowText.time >= nowWindowText.indexCT * 20) {
-							resetTextWindow({ nowWindowText.sentence });
-							setSaveVariable();
-							return true;
-						}
-					}
-					else {
-						// 左クリックorスペースで
-						if (proceedInput.down()) {
-							// 最後まで文字が表示されているなら次に行く
-							if (nowWindowText.index >= nowWindowText.sentence.size() - 1) {
-								resetTextWindow({ nowWindowText.sentence });
-								setSaveVariable();
-								return true;
-							}
-							// まだ最後まで文字が表示されていないなら最後まで全部出す
-							else {
-								nowWindowText.index = nowWindowText.sentence.size() - 1;
-							}
-						}
-					}
-
-					// 選択肢が用意されているときの処理
-					// 文字が最後まで表示されたら
-					if (!selections.isEmpty() && nowWindowText.index >= nowWindowText.sentence.size() - 1) {
-						// 選択肢を表示しておく
-						isShowSelection = true;
-						return true;
-					}
-
-					// 1文字ずつ順番に表示する
-					if (nowWindowText.time >= nowWindowText.indexCT) {
-						if (nowWindowText.index < nowWindowText.sentence.size() - 1) {
-							nowWindowText.index++;
-							nowWindowText.time = 0;
-						}
-					}
-
-					return false;
-				};
-				setMainProcess(f);
-			}
-			else {
-				// nowSentence に何も文字列が入ってないとき
-				if (!selections.isEmpty()) {
-					std::function<bool()> f = [&, this]() {
-						// 選択肢を表示
-						isShowSelection = true;
-						return true;
-					};
-					setMainProcess(f);
-				}
-			}
-		}
-		else {
-			const auto select = RegExp(U" *\\*(.*)\\[(.*)\\]").search(line);
-			if (!select.isEmpty()) {
-				// 選択肢を読み込んだら選択肢リストに追加
-				String text{ select[1].value() };
-				Array<std::pair<String, v_type>> args = getArgs(select[2].value());
-
-				String dst;
-				String type;
-				Point pos = Point{ 0, 0 };
-				Point size = Point{ 0, 0 };
-				String normal = U"", hover = U"", click = U"";
-
-				// 引数を処理
-				for (auto [option, arg] : args) {
-					if (option == U"dst") {
-						setArgument(U"choice", option, dst, arg);
-					}
-					if (option == U"dst") {
-						setArgument(U"choice", option, dst, arg);
-					}
-					if (option == U"type") {
-						setArgument(U"choice", option, type, arg);
-					}
-					if (option == U"pos") {
-						setArgument(U"choice", option, pos, arg);
-					}
-					if (option == U"size") {
-						setArgument(U"choice", option, size, arg);
-					}
-					if (option == U"normal") {
-						setArgument(U"choice", option, normal, arg);
-					}
-					if (option == U"hover") {
-						setArgument(U"choice", option, hover, arg);
-					}
-					if (option == U"click") {
-						setArgument(U"choice", option, click, arg);
-					}
-
-				}
-
-				if (type == U"image") {
-					selections.emplace_back(Choice{ text, dst, type, pos, size, normal, hover, click });
-				}
-
-				isShowSelection = false;
-			}
-			else {
-				// 選択肢でないならウィンドウに表示する（つまり普通の）文字列として処理
-				sentenceStorage += line + U"\n";
-			}
-		}
-
 	} while (!readStopFlag);
-
-
-	// 選択肢処理用(うまくまとめられなかったので例外的な処理)
-	if (isShowSelection) {
-
-		std::function<std::function<bool()>()> f = [&, this]() {
-			double _time = 0.0;
-			bool isClicked = false;
-			return [&, this, _time]() mutable {
-				_time += Scene::DeltaTime();
-
-				for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
-					if (Rect{ itr->pos, itr->size }.leftReleased() && isClicked) {
-						resetTextWindow({ nowWindowText.sentence, U"choiced : " + itr->text });
-						setSaveVariable();
-						isShowSelection = false;
-
-						FilePath fp = scriptStack.back().reader.path();
-						auto [reader, i] = getDistination(fp, itr->dst);
-
-						scriptStack.pop_back();
-						scriptStack << ScriptData{reader, i, i};
-						//scriptStack >> [](ScriptData sd) { Console << sd.reader.path(); };
-
-						selections.clear();
-						return true;
-					}
-					if (Rect{ itr->pos, itr->size }.leftClicked()) {
-						isClicked = true;
-					}
-				}
-
-				return false;
-			};
-		};
-		setMainProcess(f());
-	}
 }
 
-std::pair<TextReader, int32> Engine::getDistination(FilePath path, String dst) {
+std::pair<TextReader, size_t> Engine::getDistination(FilePath path, String dst) {
 	TextReader reader{ path };
 	if (!reader) throw Error{U"Failed to open `{}`"_fmt(path)};
 
@@ -1186,7 +1154,15 @@ bool Engine::boolCheck(std::any value) {
 }
 
 void Engine::initMainProcess() {
-	mainProcess = [&, this]() { return true; };
+	mainProcess << [&, this]() { return true; };
+}
+
+bool Engine::exeMainProcess() {
+	if ((mainProcess.front())()) {
+		Console << mainProcess.size();
+		mainProcess.pop_front();
+	}
+	return mainProcess.isEmpty();
 }
 
 void Engine::resetTextWindow(Array<String> strs) {
@@ -1242,7 +1218,7 @@ void Engine::update() {
 
 
 	// メイン処理実行
-	if (mainProcess()) {
+	if (exeMainProcess()) {
 		// 処理が終わったら次の処理を読み込む
 		readScript();
 	}
@@ -1268,7 +1244,6 @@ void Engine::update() {
 		if (!writer) throw Error{U"Failed to open SaveFile"};
 
 		// script
-		// writer(forSaveIndex);
 		Array<FilePath> scriptPathList;
 		Array<size_t> scriptSaveIndexList;
 		for (auto s : scriptStack) {
@@ -1407,12 +1382,6 @@ void Engine::update() {
 		readScript();
 	}
 
-	/*
-	if (KeyE.down()) {
-		effectIndex = (effectIndex + 1) % 4;
-	}
-	*/
-
 	if (KeyR.down()) {
 		changeScene(GameScene::Engine);
 	}
@@ -1442,40 +1411,11 @@ void Engine::draw() const {
 		return;
 	}
 
-	/*
-	renderTexture.clear(Palette::Black);
-	{
-		const ScopedRenderTarget2D target{ renderTexture };
-	}
-
-	Graphics2D::Flush();
-	renderTexture.resolve();
-
-	Graphics2D::SetPSConstantBuffer(1, cb);
-
-	if (effectIndex == 0) {
-		renderTexture.draw();
-	}
-	else if (effectIndex == 1) {
-		const ScopedCustomShader2D shader{ PixelShaderAsset(U"OnlyRed") };
-		renderTexture.draw();
-	}
-	else if (effectIndex == 2) {
-		const ScopedCustomShader2D shader{ PixelShaderAsset(U"OnlyGreen") };
-		renderTexture.draw();
-	}
-	else if (effectIndex == 3) {
-		const ScopedCustomShader2D shader{ PixelShaderAsset(U"OnlyBlue") };
-		renderTexture.draw();
-	}
-	*/
-
 	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
 		(*itr)->draw();
 	}
 
 	FontAsset(U"Medium{}"_fmt(nameSize))(nowName).draw(namePos, Palette::White);
-
 	FontAsset(U"Medium{}"_fmt(textSize))(nowWindowText.sentence.substr(0, nowWindowText.index + 1)).draw(textPos, Palette::White);
 
 	if (isShowSelection) {
