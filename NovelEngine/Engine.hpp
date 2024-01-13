@@ -62,6 +62,7 @@ private:
 	// Array<std::function<bool()>> mainProcess; // メイン処理のキュー
 	// Array<std::function<bool()>> subProcesses; // サブ処理のリスト
 	String operateLine; // 要らないかも。要検討
+	bool isStopNow;
 	void initMainProcess();
 	bool exeMainProcess();
 
@@ -146,10 +147,14 @@ private:
 		String expr; // クリック時に動作するスクリプト
 		String role; // 特殊機能
 
+		String jumptype; // goto or call
+		String link; // jump先のスクリプト
+		String dst; // スクリプト内のjump先
+
 	public:
 		Button() : Graphic{} {};
-		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, Engine* en) :
-			hoverPath(h), clickPath(c), expr(e), role(r), engine(en), Graphic{n, p, s, sc, o, l, t} {};
+		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, String jt, String li, String d, Engine* en) :
+			hoverPath(h), clickPath(c), expr(e), role(r), engine(en), jumptype(jt), link(li), dst(d), Graphic{n, p, s, sc, o, l, t} {};
 
 		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };
 		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };

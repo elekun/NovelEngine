@@ -24,6 +24,7 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 
 	processStack << Process{};
 
+	isStopNow = false;
 	initMainProcess();
 	fadeProcess = [&, this]() {};
 
@@ -612,6 +613,9 @@ void Engine::readScript() {
 					Size si = Size::Zero();
 					String e = U"";
 					String r = U"";
+					String jt = U"goto";
+					String li = scriptStack.back().reader.path();
+					String d = U"";
 
 					double fa = 0; // フェードインにかかる時間
 					double s = 1.0;
@@ -652,12 +656,21 @@ void Engine::readScript() {
 						if (option == U"role") {
 							setArgument(op, option, r, arg);
 						}
+						if (option == U"jumptype") {
+							setArgument(op, option, jt, arg);
+						}
+						if (option == U"link") {
+							setArgument(op, option, li, arg);
+						}
+						if (option == U"dst") {
+							setArgument(op, option, d, arg);
+						}
 					}
 
 					Image img{ nor }; //画像サイズの計算のために一時的にImageを作成
 					si = si.isZero() ? img.size() : si;
 
-					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, r, this });
+					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, r, jt, li, d, this });
 
 					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
@@ -1024,26 +1037,31 @@ void Engine::readScript() {
 
 				if (op == U"goto") {
 					// distination
-					FilePath path = scriptStack.back().reader.path();
+					FilePath link = scriptStack.back().reader.path();
 					String dst;
 					for (auto [option, arg] : args) {
-						if (option == U"path") {
-							setArgument(op, option, path, arg);
+						if (option == U"link") {
+							setArgument(op, option, link, arg);
 						}
 						if (option == U"dst") {
 							setArgument(op, option, dst, arg);
 						}
 					}
 
-					auto [reader, i] = getDistination(path, dst);
+					auto [reader, i] = getDistination(link, dst);
 					scriptStack.pop_back();
 					scriptStack << ScriptData{reader, i, i};
+					if (isStopNow) {
+						processStack.back().mainStack.pop_front();
+						initMainProcess();
+						isStopNow = false;
+					}
 				}
 
 				if (op == U"stop") {
-					std::function<bool()> f = [&, this]() {
-						return false;
-					};
+					isStopNow = true;
+
+					std::function<bool()> f = [&, this]() { return false; };
 					setMainProcess(f);
 				}
 
@@ -1099,7 +1117,7 @@ void Engine::readScript() {
 					FilePath fp;
 					double d; // シーン切り替えににかかる時間
 					for (auto [option, arg] : args) {
-						if (option == U"path") {
+						if (option == U"link") {
 							setArgument(op, option, fp, arg);
 						}
 						if (option == U"duration") {
@@ -1123,18 +1141,18 @@ void Engine::readScript() {
 
 				if (op == U"call") {
 					// filename
-					FilePath path = scriptStack.back().reader.path();
+					FilePath link = scriptStack.back().reader.path();
 					String dst;
 					for (auto [option, arg] : args) {
-						if (option == U"path") {
-							setArgument(op, option, path, arg);
+						if (option == U"link") {
+							setArgument(op, option, link, arg);
 						}
 						if (option == U"dst") {
 							setArgument(op, option, dst, arg);
 						}
 					}
 
-					auto [reader, i] = getDistination(path, dst);
+					auto [reader, i] = getDistination(link, dst);
 					scriptStack << ScriptData{reader, i, i};
 				}
 
@@ -1597,6 +1615,17 @@ void Engine::Button::update() {
 		}
 		else {
 			engine->interprete(expr);
+
+			auto [reader, i] = engine->getDistination(link, dst);
+			if (jumptype == U"goto") {
+				engine->scriptStack.pop_back();
+			}
+			engine->scriptStack << ScriptData{reader, i, i};
+			if (engine->isStopNow) {
+				engine->processStack.back().mainStack.pop_front();
+				engine->initMainProcess();
+				engine->isStopNow = false;
+			}
 		}
 	}
 }
