@@ -303,7 +303,7 @@ void Engine::readScript() {
 		U"music", U"sound",
 		U"wait", U"goto", U"scenechange", U"exit",
 		U"choice",
-		U"inculude", U"call", U"return",
+		U"include", U"call", U"return",
 		U"if", U"elif", U"else",U"endif"
 	};
 	String proc = U"";
@@ -1008,27 +1008,20 @@ void Engine::readScript() {
 
 				if (op == U"goto") {
 					// distination
-					FilePath fp = scriptStack.back().reader.path();
-					String d;
+					FilePath path = scriptStack.back().reader.path();
+					String dst;
 					for (auto [option, arg] : args) {
 						if (option == U"path") {
-							setArgument(op, option, fp, arg);
+							setArgument(op, option, path, arg);
 						}
 						if (option == U"dst") {
-							setArgument(op, option, d, arg);
+							setArgument(op, option, dst, arg);
 						}
 					}
 
-					std::function<bool()> f = [&, this, path = fp, dst = d]() {
-						auto [reader, i] = getDistination(path, dst);
-						scriptStack.pop_back();
-						scriptStack << ScriptData{reader, i, i};
-
-						initMainProcess();
-						return true;
-					};
-
-					setMainProcess(f);
+					auto [reader, i] = getDistination(path, dst);
+					scriptStack.pop_back();
+					scriptStack << ScriptData{reader, i, i};
 				}
 
 				if (op == U"if") {
@@ -1107,33 +1100,23 @@ void Engine::readScript() {
 
 				if (op == U"call") {
 					// filename
-					FilePath fp = scriptStack.back().reader.path();
-					String d;
+					FilePath path = scriptStack.back().reader.path();
+					String dst;
 					for (auto [option, arg] : args) {
 						if (option == U"path") {
-							setArgument(op, option, fp, arg);
+							setArgument(op, option, path, arg);
 						}
 						if (option == U"dst") {
-							setArgument(op, option, d, arg);
+							setArgument(op, option, dst, arg);
 						}
 					}
 
-					std::function<bool()> f = [&, this, file = fp]() {
-						readScript();
-						return true;
-					};
-
-					setMainProcess(f);
+					auto [reader, i] = getDistination(path, dst);
+					scriptStack << ScriptData{reader, i, i};
 				}
 
 				if (op == U"return") {
-					std::function<bool()> f = [&, this]() {
-						scriptStack.pop_back();
-						readStopFlag = false;
-						return true;
-					};
-
-					setMainProcess(f);
+					scriptStack.pop_back();
 				}
 
 				if (op == U"exit") {
@@ -1155,20 +1138,22 @@ std::pair<TextReader, size_t> Engine::getDistination(FilePath path, String dst) 
 	TextReader reader{ path };
 	if (!reader) throw Error{U"Failed to open `{}`"_fmt(path)};
 
-	String line;
 	size_t i = 0;
-	bool flag = false;
-	while (reader.readLine(line)) {
-		i++;
-		const auto skip = RegExp(U" *@(.+) *").match(line);
-		if (!skip.isEmpty()) {
-			if (skip[1].value() == dst) {
-				flag = true;
-				break;
+	if (dst) {
+		String line;
+		bool flag = false;
+		while (reader.readLine(line)) {
+			i++;
+			const auto skip = RegExp(U" *@(.+) *").match(line);
+			if (!skip.isEmpty()) {
+				if (skip[1].value() == dst) {
+					flag = true;
+					break;
+				}
 			}
 		}
+		if (!flag) throw Error{U"Not exist `@{}`"_fmt(dst)};
 	}
-	if (!flag) throw Error{U"Not exist `@{}`"_fmt(dst)};
 
 	return std::make_pair(reader, i);
 }
@@ -1277,6 +1262,8 @@ void Engine::update() {
 		return;
 	}
 
+
+
 	// サブ処理(並列可能処理)実行
 	for (auto itr = subProcesses.begin(); itr != subProcesses.end();) {
 		if ((*itr)()) {
@@ -1285,13 +1272,6 @@ void Engine::update() {
 		else {
 			++itr;
 		}
-	}
-
-
-	// メイン処理実行
-	if (exeMainProcess()) {
-		// 処理が終わったら次の処理を読み込む
-		readScript();
 	}
 
 	// 画像系の逐次処理
@@ -1308,6 +1288,15 @@ void Engine::update() {
 			++itr;
 		}
 	}
+
+	// メイン処理実行
+	if (exeMainProcess()) {
+		// 処理が終わったら次の処理を読み込む
+		readScript();
+	}
+
+
+
 
 	// クイックセーブ
 	if (KeyS.down()) {

@@ -61,13 +61,13 @@ private:
 	// 全処理共通変数
 	Array<std::function<bool()>> mainProcess; // メイン処理のキュー
 	Array<std::function<bool()>> subProcesses; // サブ処理のリスト
-	String operateLine;
+	String operateLine; // 要らないかも。要検討
 	void initMainProcess();
 	bool exeMainProcess();
 
-	InputGroup proceedInput;
 
 	// テキスト表示用変数
+	InputGroup proceedInput;
 	struct WindowText {
 	public:
 		size_t index;
@@ -210,12 +210,23 @@ private:
 	Array<Choice> selections;
 	bool isShowSelection;
 
+	struct Process {
+	public:
+		Process() : mainStack({}), subList({}), graphics({}), sounds({}) {};
+		Array<std::function<bool()>> mainStack; // メイン処理のキュー
+		Array<std::function<bool()>> subList; // サブ処理のリスト
+		Array<std::shared_ptr<Graphic>> graphics; // 画像
+		Array<Audio> sounds; // 効果音
+
+		// WindowText windowText;
+	};
+	Array<Process> processStack; // 全処理のスタック（update()を実行しない、描画はする）
+
 	// ログ
 	Array<String> scenarioLog;
 
 	// データセーブ用
 	FilePath savefile;
-	// size_t forSaveIndex; // セーブするスクリプトの行番号, メイン処理のうち前に実行したもの
 	Array<Graphic> forSaveGraphics;
 	void setSaveVariable();
 
