@@ -22,6 +22,8 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 
 	readStopFlag = false;
 
+	processStack << Process{};
+
 	initMainProcess();
 	fadeProcess = [&, this]() {};
 
@@ -292,8 +294,13 @@ void Engine::readScript() {
 	};
 
 	auto setMainProcess = [&, this](std::function<bool()> f) {
-		mainProcess << f;
+		processStack.back().mainStack << f;
+		//mainProcess << f;
 		readStopFlag = true;
+	};
+
+	auto addSubProcess = [&, this](std::function<bool()> f) {
+		processStack.back().subList.emplace_back(f);
 	};
 
 	// 命令
@@ -301,10 +308,11 @@ void Engine::readScript() {
 		U"setting", U"start", U"name",
 		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
 		U"music", U"sound",
-		U"wait", U"goto", U"scenechange", U"exit",
+		U"wait", U"goto", U"stop", U"scenechange", U"exit",
 		U"choice",
 		U"include", U"call", U"return",
-		U"if", U"elif", U"else",U"endif"
+		U"if", U"elif", U"else",U"endif",
+		U"sleeppr", U"awakepr"
 	};
 	String proc = U"";
 	for (auto [j, p] : Indexed(pn)) {
@@ -404,6 +412,7 @@ void Engine::readScript() {
 				};
 				setMainProcess(f);
 			}
+
 			// 選択肢表示
 			if (!selections.isEmpty()) {
 				if (nowWindowText.sentence == U"") {
@@ -445,6 +454,9 @@ void Engine::readScript() {
 
 				StringView op = operate[1].value(); // 処理のタグ
 				Array<std::pair<String, v_type>> args = getArgs(operate[2].value());
+
+				if (!pn.includes(String{ op }))
+					throw Error{U"{}命令は定義されていません"_fmt(String{ op })};
 
 				if (op == U"setting") {
 					FilePath fp = U""; //設定ファイルのパス
@@ -492,7 +504,8 @@ void Engine::readScript() {
 							return false;
 						};
 					};
-					subProcesses.emplace_back(f());
+					addSubProcess(f());
+					// subProcesses.emplace_back(f());
 
 					// 強制待機
 					std::function<std::function<bool()>()> w = [&, this, _d = d]() {
@@ -568,10 +581,10 @@ void Engine::readScript() {
 
 					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
-						graphics.emplace_back(img);
-						graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+						processStack.back().graphics.emplace_back(img);
+						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
-							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
 									(*itr)->setOpacity(t);
@@ -588,7 +601,7 @@ void Engine::readScript() {
 						};
 					};
 
-					subProcesses.emplace_back(f());
+					addSubProcess(f());
 				}
 
 				if (op == U"setbtn") {
@@ -648,10 +661,10 @@ void Engine::readScript() {
 
 					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
-						graphics.emplace_back(img);
-						graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+						processStack.back().graphics.emplace_back(img);
+						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
-							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
 									(*itr)->setOpacity(t);
@@ -668,7 +681,7 @@ void Engine::readScript() {
 						};
 					};
 
-					subProcesses.emplace_back(f());
+					addSubProcess(f());
 				}
 
 				if (op == U"change") {
@@ -691,14 +704,14 @@ void Engine::readScript() {
 
 					std::function<std::function<bool()>()> f = [&, this, _t = n, _fp = fp, _fa = fa]() {
 						double time = 0.0;
-						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+						for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 							if ((*itr)->getTag() == _t) {
 								(*itr)->setNextPath(_fp);
 								(*itr)->setNextTexture();
 							}
 						}
 						return [&, this, time, tag = _t, filepath = _fp, fade = _fa]() mutable {
-							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
 									(*itr)->setOpacity(1.0 - t);
@@ -708,7 +721,7 @@ void Engine::readScript() {
 							time += Scene::DeltaTime();
 
 							if (time >= fade) {
-								for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+								for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 									if ((*itr)->getTag() == tag) {
 										(*itr)->changeTexture();
 										(*itr)->setOpacity(1.0);
@@ -721,7 +734,7 @@ void Engine::readScript() {
 						};
 					};
 
-					subProcesses.emplace_back(f());
+					addSubProcess(f());
 				}
 
 				if (op == U"moveto") {
@@ -751,7 +764,7 @@ void Engine::readScript() {
 						double time = 0.0;
 						Vec2 src, dst;
 
-						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+						for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 							if ((*itr)->getTag() == _ta) {
 								src = (*itr)->getPosition();
 								dst = _dst;
@@ -760,7 +773,7 @@ void Engine::readScript() {
 						}
 
 						return [&, this, time, src, dst, duration = _dur, tag = _ta, delay = _del]() mutable {
-							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = duration > 0 ? Clamp((time - delay) / duration, 0.0, 1.0) : 1.0;
 									(*itr)->setPosition(src.lerp(dst, t));
@@ -784,7 +797,8 @@ void Engine::readScript() {
 							return false;
 						};
 					};
-					subProcesses.emplace_back(f());
+
+					addSubProcess(f());
 				}
 
 				if (op == U"moveby") {
@@ -814,7 +828,7 @@ void Engine::readScript() {
 						double time = 0.0;
 						Vec2 src, dst;
 
-						for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+						for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 							if ((*itr)->getTag() == _ta) {
 								src = (*itr)->getPosition();
 								dst = src + _by;
@@ -822,7 +836,7 @@ void Engine::readScript() {
 						}
 
 						return [&, this, time, src, dst, duration = _dur, tag = _ta, delay = _del]() mutable {
-							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = duration > 0 ? Clamp((time - delay) / duration, 0.0, 1.0) : 1.0;
 									(*itr)->setPosition(src.lerp(dst, t));
@@ -846,7 +860,8 @@ void Engine::readScript() {
 							return false;
 						};
 					};
-					subProcesses.emplace_back(f());
+
+					addSubProcess(f());
 				}
 
 				if (op == U"delete") {
@@ -867,7 +882,7 @@ void Engine::readScript() {
 					std::function<std::function<bool()>()> f = [&, this, _n = n, _fa = fa]() {
 						double time = 0.0;
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
-							for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
 									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
 									(*itr)->setOpacity(1.0 - t);
@@ -877,9 +892,9 @@ void Engine::readScript() {
 							time += Scene::DeltaTime();
 
 							if (time >= fade) {
-								for (auto itr = graphics.begin(); itr != graphics.end(); ) {
+								for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ) {
 									if ((*itr)->getTag() == tag) {
-										itr = graphics.erase(itr);
+										itr = processStack.back().graphics.erase(itr);
 									}
 									else {
 										++itr;
@@ -892,8 +907,7 @@ void Engine::readScript() {
 						};
 					};
 
-					subProcesses.emplace_back(f());
-
+					addSubProcess(f());
 				}
 
 				if (op == U"music") {
@@ -914,7 +928,8 @@ void Engine::readScript() {
 							return true;
 						};
 					};
-					subProcesses.emplace_back(f());
+
+					addSubProcess(f());
 				}
 
 				if (op == U"sound") {
@@ -926,16 +941,17 @@ void Engine::readScript() {
 						}
 					}
 					Audio a{ Audio::Stream, fp };
-
+					
 					std::function<std::function<bool()>()> f = [&, this, _a = a]() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
-							sounds.emplace_back(audio);
-							sounds.back().play();
+							processStack.back().sounds.emplace_back(audio);
+							processStack.back().sounds.back().play();
 							return true;
 						};
 					};
-					subProcesses.emplace_back(f());
+
+					addSubProcess(f());
 				}
 
 				if (op == U"wait") {
@@ -1022,6 +1038,13 @@ void Engine::readScript() {
 					auto [reader, i] = getDistination(path, dst);
 					scriptStack.pop_back();
 					scriptStack << ScriptData{reader, i, i};
+				}
+
+				if (op == U"stop") {
+					std::function<bool()> f = [&, this]() {
+						return false;
+					};
+					setMainProcess(f);
 				}
 
 				if (op == U"if") {
@@ -1119,6 +1142,30 @@ void Engine::readScript() {
 					scriptStack.pop_back();
 				}
 
+				if (op == U"sleeppr") {
+					// filename
+					bool sf = false;
+					for (auto [option, arg] : args) {
+						if (option == U"save") {
+							setArgument(op, option, sf, arg);
+						}
+					}
+
+					for (auto itr = processStack.back().sounds.begin(); itr != processStack.back().sounds.end(); ++itr) {
+						itr->pause();
+					}
+
+					processStack << Process{sf};
+				}
+
+				if (op == U"awakepr") {
+					processStack.pop_back();
+
+					for (auto itr = processStack.back().sounds.begin(); itr != processStack.back().sounds.end(); ++itr) {
+						itr->play();
+					}
+				}
+
 				if (op == U"exit") {
 					std::function<bool()> f = [&, this]() {
 						System::Exit();
@@ -1211,14 +1258,14 @@ void Engine::skipLineForIf() {
 }
 
 void Engine::initMainProcess() {
-	mainProcess << [&, this]() { return true; };
+	processStack.back().mainStack << [&, this]() { return true; };
 }
 
 bool Engine::exeMainProcess() {
-	if ((mainProcess.front())()) {
-		mainProcess.pop_front();
+	if ((processStack.back().mainStack.front())()) {
+		processStack.back().mainStack.pop_front();
 	}
-	return mainProcess.isEmpty();
+	return processStack.back().mainStack.isEmpty();
 }
 
 void Engine::resetTextWindow(Array<String> strs) {
@@ -1236,7 +1283,7 @@ void Engine::setSaveVariable() {
 	}
 
 	Array<Graphic> saveGraphics = {};
-	for (auto g : graphics) {
+	for (auto g : processStack.back().graphics) {
 		if (typeid((*g)) == typeid(Graphic)) {
 			saveGraphics << *g;
 		}
@@ -1263,11 +1310,10 @@ void Engine::update() {
 	}
 
 
-
 	// サブ処理(並列可能処理)実行
-	for (auto itr = subProcesses.begin(); itr != subProcesses.end();) {
+	for (auto itr = processStack.back().subList.begin(); itr != processStack.back().subList.end();) {
 		if ((*itr)()) {
-			itr = subProcesses.erase(itr);
+			itr = processStack.back().subList.erase(itr);
 		}
 		else {
 			++itr;
@@ -1275,14 +1321,14 @@ void Engine::update() {
 	}
 
 	// 画像系の逐次処理
-	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+	for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 		(*itr)->update();
 	}
 
 	// 音声が停止したら配列から削除
-	for (auto itr = sounds.begin(); itr != sounds.end();) {
+	for (auto itr = processStack.back().sounds.begin(); itr != processStack.back().sounds.end();) {
 		if (!itr->isPlaying()) {
-			itr = sounds.erase(itr);
+			itr = processStack.back().sounds.erase(itr);
 		}
 		else {
 			++itr;
@@ -1384,12 +1430,13 @@ void Engine::update() {
 		reader(nowName);
 
 		reader(forSaveGraphics); //画像情報をロード
-		graphics.clear();
+		processStack.back().graphics.clear();
+		// graphics.clear();
 		for (auto itr = forSaveGraphics.begin(); itr != forSaveGraphics.end(); ++itr) {
-			graphics << std::make_shared<Graphic>(*itr);
+			processStack.back().graphics << std::make_shared<Graphic>(*itr);
 		}
 
-		for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+		for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 			(*itr)->setTexture();
 		}
 
@@ -1434,7 +1481,9 @@ void Engine::update() {
 
 		// 実行中の各種処理を初期化
 		resetTextWindow({});
-		subProcesses.clear();
+
+		processStack.back().subList.clear();
+		// subProcesses.clear();
 
 		Print << U"Loaded!";
 
@@ -1471,7 +1520,13 @@ void Engine::draw() const {
 		return;
 	}
 
-	for (auto itr = graphics.begin(); itr != graphics.end(); ++itr) {
+	Array<std::shared_ptr<Graphic>> graphicList = {};
+	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
+		graphicList.append(itr->graphics);
+	}
+	graphicList.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+
+	for (auto itr = graphicList.begin(); itr != graphicList.end(); ++itr) {
 		(*itr)->draw();
 	}
 

@@ -59,8 +59,8 @@ private:
 	void skipLineForIf();
 
 	// 全処理共通変数
-	Array<std::function<bool()>> mainProcess; // メイン処理のキュー
-	Array<std::function<bool()>> subProcesses; // サブ処理のリスト
+	// Array<std::function<bool()>> mainProcess; // メイン処理のキュー
+	// Array<std::function<bool()>> subProcesses; // サブ処理のリスト
 	String operateLine; // 要らないかも。要検討
 	void initMainProcess();
 	bool exeMainProcess();
@@ -169,11 +169,11 @@ private:
 		void draw() const;
 	};
 
-	Array<std::shared_ptr<Graphic>> graphics;
+	// Array<std::shared_ptr<Graphic>> graphics;
 
 	// 音声用変数
 	Audio nowMusic;
-	Array<Audio> sounds;
+	// Array<Audio> sounds;
 
 	// 選択肢ボタン用変数
 	struct Choice{
@@ -212,13 +212,16 @@ private:
 
 	struct Process {
 	public:
-		Process() : mainStack({}), subList({}), graphics({}), sounds({}) {};
+		Process() : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(false) {};
+		Process(bool sf) : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(sf) {};
 		Array<std::function<bool()>> mainStack; // メイン処理のキュー
 		Array<std::function<bool()>> subList; // サブ処理のリスト
 		Array<std::shared_ptr<Graphic>> graphics; // 画像
 		Array<Audio> sounds; // 効果音
 
 		// WindowText windowText;
+
+		bool saveFlag;
 	};
 	Array<Process> processStack; // 全処理のスタック（update()を実行しない、描画はする）
 
