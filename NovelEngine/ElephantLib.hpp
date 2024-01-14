@@ -8,4 +8,6 @@ namespace ElephantLib {
 
 	void makeArchive(FilePath folder, FilePath output);
 	void readArchive(FilePath archive);
+
+	FilePath resrc(FilePath f);
 }

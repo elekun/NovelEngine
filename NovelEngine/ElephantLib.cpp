@@ -131,3 +131,11 @@ void ElephantLib::readArchive(FilePath archive) {
 	// TextureAsset::Release(U"test");
 	// TextureAsset::Load(U"test");
 }
+
+FilePath ElephantLib::resrc(FilePath f) {
+#ifdef _DEBUG
+	return f;
+#else
+	return Resource(f);
+#endif
+}

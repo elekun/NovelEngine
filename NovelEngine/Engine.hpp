@@ -2,6 +2,8 @@
 #include <Siv3D.hpp>
 #include "GameScene.hpp"
 
+#include "ElephantLib.hpp"
+
 #include "Lexer.hpp"
 #include "Parser.hpp"
 #include "Interpreter.hpp"
@@ -59,8 +61,6 @@ private:
 	void skipLineForIf();
 
 	// 全処理共通変数
-	// Array<std::function<bool()>> mainProcess; // メイン処理のキュー
-	// Array<std::function<bool()>> subProcesses; // サブ処理のリスト
 	String operateLine; // 要らないかも。要検討
 	bool isStopNow;
 	void initMainProcess();
