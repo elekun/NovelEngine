@@ -46,8 +46,9 @@ public:
 
 struct GameData {
 	FilePath scriptPath;
-	HashTable<String, std::shared_ptr<Variable>> vars;
-	HashTable<String, std::shared_ptr<Variable>> systemVars;
+	HashTable<String, std::shared_ptr<Variable>> tmp_vars;
+	HashTable<String, std::shared_ptr<Variable>> savedata_vars;
+	HashTable<String, std::shared_ptr<Variable>> system_vars;
 
 	bool isAuto = false;
 	double grobalVolume = 1.0;

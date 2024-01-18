@@ -1321,15 +1321,16 @@ std::pair<TextReader, size_t> Engine::getDistination(FilePath path, String dst) 
 void Engine::interprete(String code) {
 	auto tokens = Lexer().init(code).tokenize();
 	auto blk = Parser().init(tokens).block();
-	auto[v, sv] = Interpreter().init(blk, this->vars, getData().systemVars).run();
-	this->vars = v;
-	getData().systemVars = sv;
+	auto[v, sv, gv] = Interpreter().init(blk, getData().tmp_vars, getData().savedata_vars, getData().system_vars).run();
+	getData().tmp_vars = v;
+	getData().savedata_vars = sv;
+	getData().system_vars = gv;
 }
 
 std::any Engine::getValueFromVariable(String var) {
 	auto tokens = Lexer().init(var).tokenize();
 	auto blk = Parser().init(tokens).block();
-	return Interpreter().init(blk, this->vars, getData().systemVars).getValue();
+	return Interpreter().init(blk, getData().tmp_vars, getData().savedata_vars, getData().system_vars).getValue();
 }
 
 bool Engine::boolCheck(std::any value) {
@@ -1347,7 +1348,7 @@ bool Engine::boolCheck(std::any value) {
 bool Engine::evalExpression(String expr) {
 	auto tokens = Lexer().init(expr).tokenize();
 	auto blk = Parser().init(tokens).block();
-	return Interpreter().init(blk, this->vars, getData().systemVars).evalExpression();
+	return Interpreter().init(blk, getData().tmp_vars, getData().savedata_vars, getData().system_vars).evalExpression();
 }
 
 void Engine::skipLineForIf() {
@@ -1620,13 +1621,18 @@ void Engine::draw() const {
 
 	if (isShowingVariable) {
 		Print << U"-------------";
-		Print << U"Variable";
-		for (auto [k, v] : vars) {
+		Print << U"Temporary Variable";
+		for (auto [k, v] : getData().tmp_vars) {
+			Print << k << U" : " << getVariableList(v->value);
+		}
+		Print << U"";
+		Print << U"Savedata Variable";
+		for (auto [k, v] : getData().savedata_vars) {
 			Print << k << U" : " << getVariableList(v->value);
 		}
 		Print << U"";
 		Print << U"System Variable";
-		for (auto [k, v] : getData().systemVars) {
+		for (auto [k, v] : getData().system_vars) {
 			Print << k << U" : " << getVariableList(v->value);
 		}
 		Print << U"-------------";

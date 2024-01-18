@@ -30,7 +30,6 @@ private:
 	Array<shared_ptr<Token>> body();
 	shared_ptr<Token> while_(shared_ptr<Token> token);
 	shared_ptr<Token> var(shared_ptr<Token> token);
-	shared_ptr<Token> system(shared_ptr<Token> token);
 	shared_ptr<Token> newArray(shared_ptr<Token> token);
 	shared_ptr<Token> for_(shared_ptr<Token> token);
 };

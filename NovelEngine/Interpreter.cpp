@@ -7,9 +7,8 @@ std::any DynamicFunc::invoke(Array<std::any> args) {
 	context->local = make_shared<Scope>(Scope{});
 	context->local->parent = parent;
 
-
 	for (auto [i, param] : Indexed(params)) {
-		shared_ptr<Variable> v = context->newVariable(param->value);
+		shared_ptr<Variable> v = context->newVariable(param->value, U"var");
 		if (i < args.size()) {
 			v->value = context->value(args[i]);
 		}
@@ -93,10 +92,11 @@ std::any Length::invoke(Array<std::any> args) {
 	}
 }
 
-Interpreter& Interpreter::init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs, HashTable<String, shared_ptr<Variable>> svs) {
+Interpreter& Interpreter::init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs, HashTable<String, shared_ptr<Variable>> svs, HashTable<String, shared_ptr<Variable>> gvs) {
 	grobal = make_shared<Scope>(Scope{ vs });
 	local = grobal;
-	system = make_shared<Scope>(Scope{ svs });
+	savedata_var = make_shared<Scope>(Scope{ svs });
+	system_var = make_shared<Scope>(Scope{ gvs });
 	body = b;
 
 	Array<shared_ptr<Func>> tmp_func = {
@@ -105,17 +105,17 @@ Interpreter& Interpreter::init(Array<shared_ptr<Token>> b, HashTable<String, sha
 		make_shared<Length>(Length())
 	};
 	for (auto f : tmp_func) {
-		system->functions.emplace(f->name, f);
+		system_var->functions.emplace(f->name, f);
 	}
 	
 	return *this;
 }
 
-std::tuple<HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>> Interpreter::run() {
+std::tuple<HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>> Interpreter::run() {
 	Optional<bool> ret;
 	Optional<bool> brk;
 	process(body, ret, brk);
-	return { grobal->variables, system->variables };
+	return { grobal->variables, savedata_var->variables, system_var->variables };
 }
 
 std::any Interpreter::getValue() {
@@ -173,11 +173,8 @@ std::any Interpreter::process(Array<shared_ptr<Token>> b, Optional<bool>& ret, O
 				return val;
 			}
 		}
-		else if(expr->kind == U"var") {
+		else if(expr->kind == U"var" || expr->kind == U"svar" || expr->kind == U"gvar") {
 			var(expr);
-		}
-		else if (expr->kind == U"system") {
-			system_(expr);
 		}
 		else {
 			expression(expr);
@@ -243,11 +240,11 @@ std::any Interpreter::ident(shared_ptr<Token> token) {
 	String name = token->value;
 
 	// system variable
-	if (system->functions.contains(name)) {
-		return system->functions[name];
+	if (system_var->functions.contains(name)) {
+		return system_var->functions[name];
 	}
-	if (system->variables.contains(name)) {
-		return system->variables[name];
+	if (system_var->variables.contains(name)) {
+		return system_var->variables[name];
 	}
 
 	// local variable
@@ -261,7 +258,10 @@ std::any Interpreter::ident(shared_ptr<Token> token) {
 		}
 		scope = scope->parent;
 	}
-	return newVariable(name);
+
+
+	throw Error{U"{} is not defined"_fmt(name)};
+	return mono{};
 }
 
 shared_ptr<Variable> Interpreter::assign(shared_ptr<Token> expr) {
@@ -584,7 +584,8 @@ std::any Interpreter::func(shared_ptr<Token> token) {
 	shared_ptr<Interpreter> interpreter = make_shared<Interpreter>(Interpreter{});
 	interpreter->grobal = this->grobal;
 	interpreter->local = this->local;
-	interpreter->system = this->system;
+	interpreter->system_var = this->system_var;
+	interpreter->savedata_var = this->savedata_var;
 	interpreter->body = this->body;
 	DynamicFunc func{ interpreter, U"", token->params, token->block };
 	local->functions.emplace(name, make_shared<DynamicFunc>(func));
@@ -602,7 +603,14 @@ std::any Interpreter::if_(shared_ptr<Token> token, Optional<bool>& ret, Optional
 	}
 
 	if (!block.isEmpty()) {
-		return process(block, ret, brk);
+		shared_ptr<Scope> parent = local;
+		local = make_shared<Scope>(Scope{});
+		local->parent = parent;
+
+		std::any r = process(block, ret, brk);
+
+		local = parent;
+		return r;
 	}
 	else {
 		return mono{};
@@ -643,15 +651,23 @@ int32 Interpreter::toInt(bool b) { return b ? 1 : 0; }
 std::any Interpreter::while_(shared_ptr<Token> token, Optional<bool>& ret) {
 	Optional<bool> brk = false;
 	std::any val;
+
+	shared_ptr<Scope> parent = local;
+	local = make_shared<Scope>(Scope{});
+	local->parent = parent;
+
 	while (isTrue(token->left)) {
 		val = process(token->block, ret, brk);
 		if (ret.has_value() && ret.value()) {
+			local = parent;
 			return val;
 		}
 		if (brk.value()) {
+			local = parent;
 			return mono{};
 		}
 	}
+	local = parent;
 	return mono{};
 }
 
@@ -671,8 +687,8 @@ std::any Interpreter::var(shared_ptr<Token> token) {
 			throw Error{U"var error"};
 		}
 
-		if (!local->variables.contains(name)) {
-			newVariable(name);
+		if (!local->variables.contains(name) && !system_var->variables.contains(name) && !savedata_var->variables.contains(name)) {
+			newVariable(name, token->kind);
 		}
 		if (expr != nullptr) {
 			expression(expr);
@@ -681,41 +697,17 @@ std::any Interpreter::var(shared_ptr<Token> token) {
 	return mono{};
 }
 
-shared_ptr<Variable> Interpreter::newVariable(String name) {
+shared_ptr<Variable> Interpreter::newVariable(String name, String type) {
 	shared_ptr<Variable> v = make_shared<Variable>(Variable{ name, mono{} });
-	local->variables.emplace(name, v);
-	return v;
-}
-
-std::any Interpreter::system_(shared_ptr<Token> token) {
-	for (auto item : token->block) {
-		String name;
-		shared_ptr<Token> expr;
-		if (item->kind == U"ident") {
-			name = item->value;
-			expr = nullptr;
-		}
-		else if (item->kind == U"sign" && item->value == U"=") {
-			name = item->left->value;
-			expr = item;
-		}
-		else {
-			throw Error{U"system var error"};
-		}
-
-		if (!system->variables.contains(name)) {
-			newSystemVariable(name);
-		}
-		if (expr != nullptr) {
-			expression(expr);
-		}
+	if (type == U"var") {
+		local->variables.emplace(name, v);
 	}
-	return mono{};
-}
-
-shared_ptr<Variable> Interpreter::newSystemVariable(String name) {
-	shared_ptr<Variable> v = make_shared<Variable>(Variable{ name, mono{} });
-	system->variables.emplace(name, v);
+	else if (type == U"svar") {
+		savedata_var->variables.emplace(name, v);
+	}
+	else if (type == U"gvar") {
+		system_var->variables.emplace(name, v);
+	}
 	return v;
 }
 
@@ -732,7 +724,8 @@ shared_ptr<DynamicFunc> Interpreter::fexpr(shared_ptr<Token> token) {
 	interpreter->grobal = this->grobal;
 	interpreter->local = this->local;
 	interpreter->body = this->body;
-	interpreter->system = this->system;
+	interpreter->system_var = this->system_var;
+	interpreter->savedata_var = this->savedata_var;
 	DynamicFunc func{ interpreter, U"", token->params, token->block };
 
 	return make_shared<DynamicFunc>(func);
@@ -783,14 +776,24 @@ std::any Interpreter::arr(std::any v) {
 std::any Interpreter::for_(shared_ptr<Token> token, Optional<bool>& ret) {
 	Optional<bool> brk = false;
 	std::any val;
-	for (expression(token->left); isTrue(token->center); expression(token->right)) {
+
+	shared_ptr<Scope> parent = local;
+	local = make_shared<Scope>(Scope{});
+	local->parent = parent;
+
+	for (token->left->kind == U"var" ? var(token->left) : expression(token->left); isTrue(token->center); expression(token->right)) {
 		val = process(token->block, ret, brk);
 		if (ret.has_value() && ret.value()) {
+			local = parent;
 			return val;
 		}
 		if (brk.value()) {
+			local = parent;
 			return mono{};
 		}
 	}
+
+	local = parent;
+
 	return mono{};
 }

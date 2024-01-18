@@ -17,7 +17,6 @@ public:
 
 private:
 	// ゲーム内変数
-	HashTable<String, shared_ptr<Variable>> vars;
 	v_type stringToVariable(String type = U"string", String v = U"");
 
 	// 汎用関数
