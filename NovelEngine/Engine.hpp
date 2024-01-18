@@ -29,16 +29,6 @@ private:
 	template <>
 	void setArgumentParse(StringView op, StringView option, String& v, v_type arg);
 
-	// ゲーム用システム変数
-	FilePath settingfile;
-	int32 textSize;
-	int32 nameSize;
-	Point textPos;
-	Point namePos;
-	Rect textRect;
-	void readSetting();
-
-
 	// スクリプト用変数
 	struct ScriptData {
 		ScriptData(TextReader tr, size_t i, size_t si) : reader(tr), index(i), saveIndex(si) {};
@@ -69,19 +59,34 @@ private:
 
 	// テキスト表示用変数
 	InputGroup proceedInput;
+
+	Point messagePos;
+	Point namePos;
+	int32 defaultMessageSize;
+	int32 defaultNameSize;
+	int32 layer;
 	struct WindowText {
 	public:
+		Point messagePos;
+		Point namePos;
+		int32 defaultMessageSize;
+		int32 defaultNameSize;
+		int32 layer;
+
 		size_t index;
 		double indexCT;
-		String sentence;
+		String message;
+		String name;
 
 		double time;
 		Audio voice;
 
-		WindowText() : index(0), indexCT(0.0), sentence(U""), time(0.0) {
-		};
+		WindowText() : index(0), indexCT(0.0), message(U""), name(U""), time(0.0) {};
+		WindowText(Point mp, Point np, int32 ms, int32 ns, int32 l)
+			: messagePos(mp), namePos(np), defaultMessageSize(ms), defaultNameSize(ns), layer(l), index(0), indexCT(0.0), message(U""), name(U""), time(0.0) {};
+		void draw() const;
 	};
-	WindowText nowWindowText;
+
 	String sentenceStorage;
 	bool checkAuto;
 
@@ -92,7 +97,6 @@ private:
 	double sceneFade; // シーンのフェードの進行度 range: 0.0 - 1.0
 	std::function<void()> fadeProcess;
 
-	// 画像表示用変数
 	class Graphic {
 	protected:
 		Texture texture;
@@ -132,7 +136,6 @@ private:
 		virtual void update();
 		void draw() const;
 	};
-
 	class Button : public Graphic{
 	protected:
 		Texture hover;
@@ -174,12 +177,6 @@ private:
 		void draw() const;
 	};
 
-	// Array<std::shared_ptr<Graphic>> graphics;
-
-	// 音声用変数
-	Audio nowMusic;
-	// Array<Audio> sounds;
-
 	// 選択肢ボタン用変数
 	struct Choice{
 		String text;
@@ -215,6 +212,9 @@ private:
 	Array<Choice> selections;
 	bool isShowSelection;
 
+
+	Audio nowMusic; // BGM
+
 	struct Process {
 	public:
 		Process() : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(false) {};
@@ -224,14 +224,13 @@ private:
 		Array<std::shared_ptr<Graphic>> graphics; // 画像
 		Array<Audio> sounds; // 効果音
 
-		// WindowText windowText;
+		WindowText windowText;
 
 		bool saveFlag;
 	};
 	Array<Process> processStack; // 全処理のスタック（update()を実行しない、描画はする）
 
-	// ログ
-	Array<String> scenarioLog;
+	Array<String> scenarioLog; // ログ
 
 	// データセーブ用
 	FilePath savefile;

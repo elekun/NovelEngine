@@ -10,4 +10,6 @@ namespace ElephantLib {
 	void readArchive(FilePath archive);
 
 	FilePath resrc(FilePath f);
+
+	extern HashTable<String, Input> stringToInput;
 }

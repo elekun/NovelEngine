@@ -8,7 +8,6 @@
 
 using namespace ElephantLib;
 
-
 Engine::Engine(const InitData& init) : IScene{ init } {
 
 	Console << U"script path :" << getData().scriptPath;
@@ -137,47 +136,6 @@ inline void Engine::setArgumentParse(StringView op, StringView option, String& v
 	}, arg);
 }
 
-void Engine::readSetting() {
-	TextReader reader{ settingfile };
-	if (!reader) {
-		throw Error{ U"Failed to open setting file." };
-	}
-	Array<String> si = { U"textSize", U"textPosition", U"textRect", U"nameSize", U"namePosition" };
-	String list = U"";
-	for (auto [j, p] : Indexed(si)) {
-		list += p;
-		if (j != si.size() - 1) { list += U"|"; }
-	}
-
-	String line;
-	while (reader.readLine(line)) {
-		// 設定ファイルの項目とその引数の読み込み
-		const auto setting = RegExp(U" *({}): *(.+)"_fmt(list)).search(line);
-		StringView st = setting[1].value(); // 処理のタグ
-		const auto tmp = String{ setting[2].value() }.split(',');
-		Array<String> args = {};
-		for (auto i : tmp) {
-			String t = String{ RegExp(U" *(.+) *").search(i)[1].value() }; //前後のスペースを削除
-			if (t != U"") {
-				args << t;
-			}
-		}
-
-		if (st == U"textSize") {
-			textSize = Max(Parse<int32>(args[0]), 1);
-		}
-		if (st == U"nameSize") {
-			nameSize = Max(Parse<int32>(args[0]), 1);
-		}
-		if (st == U"textPosition") {
-			textPos = Point{ Parse<int32>(args[0]), Parse<int32>(args[1]) };
-		}
-		if (st == U"namePosition") {
-			namePos = Point{ Parse<int32>(args[0]), Parse<int32>(args[1]) };
-		}
-	}
-}
-
 void Engine::readScriptLine(String& s) {
 	if (scriptStack.isEmpty()) {
 		s = U"";
@@ -230,7 +188,15 @@ void Engine::readScript() {
 			// string or not
 			Array<char32> _q = { U'\'', U'"', U'`' };
 			if (auto mr = RegExp(U"\"(.*)\"|'(.*)'|`(.*)`").match(optionArg)) {
-				value = String{ mr[1].value() };
+				if (mr[1].has_value()) {
+					value = String{ mr[1].value() };
+				}
+				else if (mr[2].has_value()) {
+					value = String{ mr[2].value() };
+				}
+				else if (mr[3].has_value()) {
+					value = String{ mr[3].value() };
+				}
 				args << std::make_pair(optionName, value);
 				continue;
 			}
@@ -306,14 +272,15 @@ void Engine::readScript() {
 
 	// 命令
 	Array<String> pn = {
-		U"setting", U"start", U"name",
+		U"start", U"name",
+		U"mes_config",
 		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
-		U"music", U"sound",
-		U"wait", U"goto", U"stop", U"scenechange", U"exit",
-		U"choice",
-		U"include", U"call", U"return",
+		U"music", U"sound", U"volmusic", U"volsound",
+		U"wait", U"stop", U"scenechange", U"exit",
+		U"choice", U"goto", U"call", U"return",
 		U"if", U"elif", U"else",U"endif",
-		U"sleeppr", U"awakepr"
+		U"sleeppr", U"awakepr",
+		U"input", U"mousewheel"
 	};
 	String proc = U"";
 	for (auto [j, p] : Indexed(pn)) {
@@ -363,16 +330,16 @@ void Engine::readScript() {
 		else {
 			// 文章表示
 			if (sentenceStorage != U"") {
-				nowWindowText.sentence = eraseBackChar(sentenceStorage, U'\n'); // 末尾の改行を削除
-				nowWindowText.indexCT = 0.05;
+				processStack.back().windowText.message = eraseBackChar(sentenceStorage, U'\n'); // 末尾の改行を削除
+				processStack.back().windowText.indexCT = 0.05;
 
 				std::function<bool()> f = [&, this]() {
 
-					nowWindowText.time += Scene::DeltaTime();
+					processStack.back().windowText.time += Scene::DeltaTime();
 
 					if (getData().isAuto) {
-						if (nowWindowText.time >= nowWindowText.indexCT * 20) {
-							resetTextWindow({ nowWindowText.sentence });
+						if (processStack.back().windowText.time >= processStack.back().windowText.indexCT * 20) {
+							resetTextWindow({ processStack.back().windowText.message });
 							setSaveVariable();
 							return true;
 						}
@@ -381,31 +348,31 @@ void Engine::readScript() {
 						// 左クリックorスペースで
 						if (proceedInput.down()) {
 							// 最後まで文字が表示されているなら次に行く
-							if (nowWindowText.index >= nowWindowText.sentence.size() - 1) {
-								resetTextWindow({ nowWindowText.sentence });
+							if (processStack.back().windowText.index >= processStack.back().windowText.message.size() - 1) {
+								resetTextWindow({ processStack.back().windowText.message });
 								setSaveVariable();
 								return true;
 							}
 							// まだ最後まで文字が表示されていないなら最後まで全部出す
 							else {
-								nowWindowText.index = nowWindowText.sentence.size() - 1;
+								processStack.back().windowText.index = processStack.back().windowText.message.size() - 1;
 							}
 						}
 					}
 
 					// 選択肢が用意されているときの処理
 					// 文字が最後まで表示されたら
-					if (!selections.isEmpty() && nowWindowText.index >= nowWindowText.sentence.size() - 1) {
+					if (!selections.isEmpty() && processStack.back().windowText.index >= processStack.back().windowText.message.size() - 1) {
 						// 選択肢を表示しておく
 						isShowSelection = true;
 						return true;
 					}
 
 					// 1文字ずつ順番に表示する
-					if (nowWindowText.time >= nowWindowText.indexCT) {
-						if (nowWindowText.index < nowWindowText.sentence.size() - 1) {
-							nowWindowText.index++;
-							nowWindowText.time = 0;
+					if (processStack.back().windowText.time >= processStack.back().windowText.indexCT) {
+						if (processStack.back().windowText.index < processStack.back().windowText.message.size() - 1) {
+							processStack.back().windowText.index++;
+							processStack.back().windowText.time = 0;
 						}
 					}
 
@@ -416,7 +383,7 @@ void Engine::readScript() {
 
 			// 選択肢表示
 			if (!selections.isEmpty()) {
-				if (nowWindowText.sentence == U"") {
+				if (processStack.back().windowText.message == U"") {
 					isShowSelection = true;
 				}
 				std::function<std::function<bool()>()> f = [&, this]() {
@@ -424,7 +391,7 @@ void Engine::readScript() {
 					return [&, this]() mutable {
 						for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
 							if (Rect{ itr->pos, itr->size }.leftReleased() && isClicked) {
-								resetTextWindow({ nowWindowText.sentence, U"choiced : " + itr->text });
+								resetTextWindow({ processStack.back().windowText.message, U"choiced : " + itr->text });
 								setSaveVariable();
 								isShowSelection = false;
 
@@ -452,28 +419,11 @@ void Engine::readScript() {
 		// 各種処理
 		if (operateLine != U"") {
 			if (auto operate = RegExp(U"({})\\[(.*)\\]"_fmt(proc)).match(operateLine)) {
-
 				StringView op = operate[1].value(); // 処理のタグ
 				Array<std::pair<String, v_type>> args = getArgs(operate[2].value());
 
 				if (!pn.includes(String{ op }))
 					throw Error{U"{}命令は定義されていません"_fmt(String{ op })};
-
-				if (op == U"setting") {
-					FilePath fp = U""; //設定ファイルのパス
-					for (auto [option, arg] : args) {
-						if (option == U"path") {
-							setArgument(op, option, fp, arg);
-						}
-					}
-
-					std::function<bool()> f = [&, this, p = fp]() {
-						settingfile = p;
-						readSetting();
-						return true;
-					};
-					setMainProcess(f);
-				}
 
 				if (op == U"start") {
 					// ...option
@@ -537,6 +487,39 @@ void Engine::readScript() {
 						return true;
 					};
 					setMainProcess(f);
+				}
+
+				if (op == U"mes_config") {
+					Point mp = Point::Zero(), np = Point::Zero();
+					int32 ms = 0, ns = 0;
+					int32 l = 0;
+					for (auto [option, arg] : args) {
+						if (option == U"mes_pos") {
+							setArgument(op, option, mp, arg);
+							messagePos = mp;
+							processStack.back().windowText.messagePos = mp;
+						}
+						if (option == U"name_pos") {
+							setArgument(op, option, np, arg);
+							namePos = np;
+							processStack.back().windowText.namePos = np;
+						}
+						if (option == U"mes_size") {
+							setArgument(op, option, ms, arg);
+							defaultMessageSize = ms;
+							processStack.back().windowText.defaultMessageSize = ms;
+						}
+						if (option == U"name_size") {
+							setArgument(op, option, ns, arg);
+							defaultNameSize = ns;
+							processStack.back().windowText.defaultNameSize = ns;
+						}
+						if (option == U"layer") {
+							setArgument(op, option, l, arg);
+							layer = l;
+							processStack.back().windowText.layer = l;
+						}
+					}
 				}
 
 				if (op == U"setimg") {
@@ -613,7 +596,7 @@ void Engine::readScript() {
 					Size si = Size::Zero();
 					String e = U"";
 					String r = U"";
-					String jt = U"goto";
+					String jt = U"";
 					String li = scriptStack.back().reader.path();
 					String d = U"";
 
@@ -937,7 +920,7 @@ void Engine::readScript() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
 							nowMusic = audio;
-							nowMusic.play();
+							nowMusic.play(MixBus0);
 							return true;
 						};
 					};
@@ -959,7 +942,7 @@ void Engine::readScript() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
 							processStack.back().sounds.emplace_back(audio);
-							processStack.back().sounds.back().play();
+							processStack.back().sounds.back().play(MixBus1);
 							return true;
 						};
 					};
@@ -967,18 +950,38 @@ void Engine::readScript() {
 					addSubProcess(f());
 				}
 
+				if (op == U"volmusic") {
+					double v = 1.0;
+					for (auto [option, arg] : args) {
+						if (option == U"volume") {
+							setArgument(op, option, v, arg);
+						}
+					}
+					GlobalAudio::BusSetVolume(MixBus0, v);
+				}
+
+				if (op == U"volsound") {
+					double v = 1.0;
+					for (auto [option, arg] : args) {
+						if (option == U"volume") {
+							setArgument(op, option, v, arg);
+						}
+					}
+					GlobalAudio::BusSetVolume(MixBus1, v);
+				}
+
 				if (op == U"wait") {
 					// duration
-					double d = 0.0;
+					double t = 0.0;
 					for (auto [option, arg] : args) {
-						if (option == U"duration") {
-							setArgumentParse(op, option, d, arg);
+						if (option == U"time") {
+							setArgumentParse(op, option, t, arg);
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _d = d]() {
+					std::function<std::function<bool()>()> f = [&, this, _t = t]() {
 						double time = 0.0;
-						return [&, this, time, duration = _d]() mutable {
+						return [&, this, time, duration = _t]() mutable {
 							if (time >= duration) {
 								return true;
 							}
@@ -1135,10 +1138,6 @@ void Engine::readScript() {
 					setMainProcess(f);
 				}
 
-				if (op == U"include") {
-
-				}
-
 				if (op == U"call") {
 					// filename
 					FilePath link = scriptStack.back().reader.path();
@@ -1161,7 +1160,6 @@ void Engine::readScript() {
 				}
 
 				if (op == U"sleeppr") {
-					// filename
 					bool sf = false;
 					for (auto [option, arg] : args) {
 						if (option == U"save") {
@@ -1182,6 +1180,103 @@ void Engine::readScript() {
 					for (auto itr = processStack.back().sounds.begin(); itr != processStack.back().sounds.end(); ++itr) {
 						itr->play();
 					}
+				}
+
+				if (op == U"input") {
+					String who;
+					String down_exp, press_exp, up_exp;
+					String jumptype = U"";
+					String link = scriptStack.back().reader.path();
+					String dst = U"";
+					for (auto [option, arg] : args) {
+						if (option == U"who") {
+							setArgument(op, option, who, arg);
+						}
+						if (option == U"down_exp") {
+							setArgument(op, option, down_exp, arg);
+						}
+						if (option == U"press_exp") {
+							setArgument(op, option, press_exp, arg);
+						}
+						if (option == U"up_exp") {
+							setArgument(op, option, up_exp, arg);
+						}
+						if (option == U"jumptype") {
+							setArgument(op, option, jumptype, arg);
+						}
+						if (option == U"link") {
+							setArgument(op, option, link, arg);
+						}
+						if (option == U"dst") {
+							setArgument(op, option, dst, arg);
+						}
+					}
+
+					std::function<bool()> f = [&, this, input = ElephantLib::stringToInput[who], down_exp, press_exp, up_exp, jumptype, link, dst]() {
+						if (input.down()) {
+							interprete(down_exp);
+
+							auto [reader, i] = getDistination(link, dst);
+							if (jumptype) {
+								if (jumptype == U"goto") {
+									scriptStack.pop_back();
+								}
+								scriptStack << ScriptData{reader, i, i};
+								if (isStopNow) {
+									processStack.back().mainStack.pop_front();
+									initMainProcess();
+									isStopNow = false;
+								}
+							}
+						}
+						if (input.pressed()) {
+							interprete(press_exp);
+						}
+						if (input.up()) {
+							interprete(up_exp);
+						}
+						return false;
+					};
+
+					addSubProcess(f);
+				}
+
+				if (op == U"get_inputduration") {
+					String who;
+					String var;
+					for (auto [option, arg] : args) {
+						if (option == U"who") {
+							setArgument(op, option, who, arg);
+						}
+						if (option == U"var") {
+							setArgument(op, option, var, arg);
+						}
+					}
+
+					std::function<bool()> f = [&, this, input = ElephantLib::stringToInput[who], var]() {
+						if (input.up()) {
+							interprete(U"{} = {}"_fmt(var, input.pressedDuration()));
+						}
+						return false;
+					};
+
+					addSubProcess(f);
+				}
+
+				if (op == U"get_wheelscroll") {
+					String var;
+					for (auto [option, arg] : args) {
+						if (option == U"var") {
+							setArgument(op, option, var, arg);
+						}
+					}
+
+					std::function<bool()> f = [&, this, var]() {
+						interprete(U"{} = {}"_fmt(var, Mouse::Wheel()));
+						return false;
+					};
+
+					addSubProcess(f);
 				}
 
 				if (op == U"exit") {
@@ -1292,7 +1387,7 @@ void Engine::resetTextWindow(Array<String> strs) {
 	}
 
 	sentenceStorage = U"";
-	nowWindowText = WindowText{};
+	processStack.back().windowText = WindowText{ messagePos, namePos, defaultMessageSize, defaultNameSize, layer };
 }
 
 void Engine::setSaveVariable() {
@@ -1538,18 +1633,29 @@ void Engine::draw() const {
 		return;
 	}
 
-	Array<std::shared_ptr<Graphic>> graphicList = {};
-	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
-		graphicList.append(itr->graphics);
-	}
-	graphicList.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+	
+	bool messageDrawFlag = false;
+	int32 meslayer = processStack.back().windowText.layer;
+	for (auto i : step(processStack.size())) {
+		int32 nowlayer = INT32_MIN, prevlayer = INT32_MIN;
+		for (auto itr = processStack.at(i).graphics.begin(); itr != processStack.at(i).graphics.end(); ++itr) {
+			prevlayer = nowlayer;
+			nowlayer = (*itr)->getLayer();
+			if (!messageDrawFlag && i == processStack.size() - 1) {
+				if (prevlayer <= meslayer && meslayer < nowlayer) {
+					Console << U"message";
+					processStack.back().windowText.draw();
+					messageDrawFlag = true;
+				}
+			}
 
-	for (auto itr = graphicList.begin(); itr != graphicList.end(); ++itr) {
-		(*itr)->draw();
+			(*itr)->draw();
+		}
+	}
+	if (!messageDrawFlag) {
+		processStack.back().windowText.draw();
 	}
 
-	FontAsset(U"Medium{}"_fmt(nameSize))(nowName).draw(namePos, Palette::White);
-	FontAsset(U"Medium{}"_fmt(textSize))(nowWindowText.sentence.substr(0, nowWindowText.index + 1)).draw(textPos, Palette::White);
 
 	if (isShowSelection) {
 		for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
@@ -1587,6 +1693,11 @@ String Engine::getVariableList(std::any arg) const {
 	}
 }
 
+void Engine::WindowText::draw() const {
+	FontAsset(U"Medium{}"_fmt(defaultNameSize))(name).draw(namePos, Palette::White);
+	FontAsset(U"Medium{}"_fmt(defaultMessageSize))(message.substr(0, index + 1)).draw(messagePos, Palette::White);
+}
+
 void Engine::Graphic::update() {}
 
 void Engine::Graphic::draw() const {
@@ -1617,14 +1728,16 @@ void Engine::Button::update() {
 			engine->interprete(expr);
 
 			auto [reader, i] = engine->getDistination(link, dst);
-			if (jumptype == U"goto") {
-				engine->scriptStack.pop_back();
-			}
-			engine->scriptStack << ScriptData{reader, i, i};
-			if (engine->isStopNow) {
-				engine->processStack.back().mainStack.pop_front();
-				engine->initMainProcess();
-				engine->isStopNow = false;
+			if (jumptype) {
+				if (jumptype == U"goto") {
+					engine->scriptStack.pop_back();
+				}
+				engine->scriptStack << ScriptData{reader, i, i};
+				if (engine->isStopNow) {
+					engine->processStack.back().mainStack.pop_front();
+					engine->initMainProcess();
+					engine->isStopNow = false;
+				}
 			}
 		}
 	}

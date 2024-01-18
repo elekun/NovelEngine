@@ -65,6 +65,7 @@ public:
 	shared_ptr<Scope> grobal;
 	shared_ptr<Scope> local;
 	shared_ptr<Scope> system;
+	shared_ptr<Scope> temporary;
 
 	Interpreter(){};
 	Interpreter& init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs, HashTable<String, shared_ptr<Variable>> svs);
