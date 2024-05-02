@@ -21,19 +21,20 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 
 	readStopFlag = false;
 
-	processStack << Process{};
+	processStack << Process{true};
 
 	isStopNow = false;
 	initMainProcess();
 	fadeProcess = [&, this]() {};
 
-	nowName = U"";
 	isShowSelection = false;
 
 	isShowingLog = false;
 	isShowingVariable = false;
 
 	savefile = U"./test_save.dat";
+
+	musicPath = U"";
 
 	proceedInput = MouseL | KeyEnter | KeySpace;
 }
@@ -280,13 +281,15 @@ void Engine::readScript() {
 		U"choice", U"goto", U"call", U"return",
 		U"if", U"elif", U"else",U"endif",
 		U"sleeppr", U"awakepr",
-		U"input", U"mousewheel"
+		U"input", U"getpresstime", U"wheelscroll"
 	};
 	String proc = U"";
 	for (auto [j, p] : Indexed(pn)) {
 		proc += p;
 		if (j != pn.size() - 1) { proc += U"|"; }
 	}
+
+	String operateLine = U"";
 
 	// 文章を読み込む処理
 	do {
@@ -348,21 +351,21 @@ void Engine::readScript() {
 						// 左クリックorスペースで
 						if (proceedInput.down()) {
 							// 最後まで文字が表示されているなら次に行く
-							if (processStack.back().windowText.index >= processStack.back().windowText.message.size() - 1) {
+							if (processStack.back().windowText.index >= processStack.back().windowText.message.size()) {
 								resetTextWindow({ processStack.back().windowText.message });
 								setSaveVariable();
 								return true;
 							}
 							// まだ最後まで文字が表示されていないなら最後まで全部出す
 							else {
-								processStack.back().windowText.index = processStack.back().windowText.message.size() - 1;
+								processStack.back().windowText.index = processStack.back().windowText.message.size();
 							}
 						}
 					}
 
 					// 選択肢が用意されているときの処理
 					// 文字が最後まで表示されたら
-					if (!selections.isEmpty() && processStack.back().windowText.index >= processStack.back().windowText.message.size() - 1) {
+					if (!selections.isEmpty() && processStack.back().windowText.index >= processStack.back().windowText.message.size()) {
 						// 選択肢を表示しておく
 						isShowSelection = true;
 						return true;
@@ -370,7 +373,7 @@ void Engine::readScript() {
 
 					// 1文字ずつ順番に表示する
 					if (processStack.back().windowText.time >= processStack.back().windowText.indexCT) {
-						if (processStack.back().windowText.index < processStack.back().windowText.message.size() - 1) {
+						if (processStack.back().windowText.index < processStack.back().windowText.message.size()) {
 							processStack.back().windowText.index++;
 							processStack.back().windowText.time = 0;
 						}
@@ -483,7 +486,7 @@ void Engine::readScript() {
 					}
 
 					std::function<bool()> f = [&, this, n = name]() {
-						nowName = n;
+						processStack.back().windowText.name = n;
 						return true;
 					};
 					setMainProcess(f);
@@ -915,6 +918,7 @@ void Engine::readScript() {
 						}
 					}
 					Audio a{ Audio::Stream, fp };
+					musicPath = fp;
 
 					std::function<std::function<bool()>()> f = [&, this, _a = a]() {
 						double time = 0.0;
@@ -1212,36 +1216,12 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<bool()> f = [&, this, input = ElephantLib::stringToInput[who], down_exp, press_exp, up_exp, jumptype, link, dst]() {
-						if (input.down()) {
-							interprete(down_exp);
-
-							auto [reader, i] = getDistination(link, dst);
-							if (jumptype) {
-								if (jumptype == U"goto") {
-									scriptStack.pop_back();
-								}
-								scriptStack << ScriptData{reader, i, i};
-								if (isStopNow) {
-									processStack.back().mainStack.pop_front();
-									initMainProcess();
-									isStopNow = false;
-								}
-							}
-						}
-						if (input.pressed()) {
-							interprete(press_exp);
-						}
-						if (input.up()) {
-							interprete(up_exp);
-						}
-						return false;
-					};
-
-					addSubProcess(f);
+					InputProcess ip{ who, down_exp, press_exp, up_exp, jumptype, link, dst };
+					ip.init(this);
+					processStack.back().continueList << std::make_shared<InputProcess>(ip);
 				}
 
-				if (op == U"get_inputduration") {
+				if (op == U"getpresstime") {
 					String who;
 					String var;
 					for (auto [option, arg] : args) {
@@ -1253,30 +1233,26 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<bool()> f = [&, this, input = ElephantLib::stringToInput[who], var]() {
-						if (input.up()) {
-							interprete(U"{} = {}"_fmt(var, input.pressedDuration()));
-						}
-						return false;
-					};
-
-					addSubProcess(f);
+					GetDurationProcess gdp{ who, var };
+					gdp.init(this);
+					processStack.back().continueList << std::make_shared<GetDurationProcess>(gdp);
 				}
 
-				if (op == U"get_wheelscroll") {
+				if (op == U"wheelscroll") {
 					String var;
+					String exp;
 					for (auto [option, arg] : args) {
 						if (option == U"var") {
 							setArgument(op, option, var, arg);
 						}
+						if (option == U"exp") {
+							setArgument(op, option, exp, arg);
+						}
 					}
 
-					std::function<bool()> f = [&, this, var]() {
-						interprete(U"{} = {}"_fmt(var, Mouse::Wheel()));
-						return false;
-					};
-
-					addSubProcess(f);
+					MouseWheelScrollProcess mwsl{ var, exp };
+					mwsl.init(this);
+					processStack.back().continueList << std::make_shared<MouseWheelScrollProcess>(mwsl);
 				}
 
 				if (op == U"exit") {
@@ -1321,15 +1297,16 @@ std::pair<TextReader, size_t> Engine::getDistination(FilePath path, String dst) 
 void Engine::interprete(String code) {
 	auto tokens = Lexer().init(code).tokenize();
 	auto blk = Parser().init(tokens).block();
-	auto[v, sv] = Interpreter().init(blk, this->vars, getData().systemVars).run();
-	this->vars = v;
-	getData().systemVars = sv;
+	auto[v, sv, gv] = Interpreter().init(blk, getData().tmp_vars, getData().savedata_vars, getData().system_vars).run();
+	getData().tmp_vars = v;
+	getData().savedata_vars = sv;
+	getData().system_vars = gv;
 }
 
 std::any Engine::getValueFromVariable(String var) {
 	auto tokens = Lexer().init(var).tokenize();
 	auto blk = Parser().init(tokens).block();
-	return Interpreter().init(blk, this->vars, getData().systemVars).getValue();
+	return Interpreter().init(blk, getData().tmp_vars, getData().savedata_vars, getData().system_vars).getValue();
 }
 
 bool Engine::boolCheck(std::any value) {
@@ -1347,7 +1324,7 @@ bool Engine::boolCheck(std::any value) {
 bool Engine::evalExpression(String expr) {
 	auto tokens = Lexer().init(expr).tokenize();
 	auto blk = Parser().init(tokens).block();
-	return Interpreter().init(blk, this->vars, getData().systemVars).evalExpression();
+	return Interpreter().init(blk, getData().tmp_vars, getData().savedata_vars, getData().system_vars).evalExpression();
 }
 
 void Engine::skipLineForIf() {
@@ -1395,13 +1372,7 @@ void Engine::setSaveVariable() {
 		itr->saveIndex = itr->index;
 	}
 
-	Array<Graphic> saveGraphics = {};
-	for (auto g : processStack.back().graphics) {
-		if (typeid((*g)) == typeid(Graphic)) {
-			saveGraphics << *g;
-		}
-	}
-	forSaveGraphics = saveGraphics;
+	saveProcessStack = processStack;
 }
 
 void Engine::update() {
@@ -1420,6 +1391,11 @@ void Engine::update() {
 	// ログ見せの場合は何も動かさない
 	if (isShowingLog || isShowingVariable) {
 		return;
+	}
+
+	// 継続処理
+	for (auto itr = processStack.back().continueList.begin(); itr != processStack.back().continueList.end(); ++itr) {
+		(*itr)->invoke();
 	}
 
 
@@ -1448,162 +1424,24 @@ void Engine::update() {
 		}
 	}
 
+
 	// メイン処理実行
 	if (exeMainProcess()) {
 		// 処理が終わったら次の処理を読み込む
 		readScript();
 	}
 
-
-
-
 	// クイックセーブ
 	if (KeyS.down()) {
-		Serializer<BinaryWriter> writer{ savefile };
-		if (!writer) throw Error{U"Failed to open SaveFile"};
-
-		// script
-		Array<FilePath> scriptPathList;
-		Array<size_t> scriptSaveIndexList;
-		for (auto s : scriptStack) {
-			scriptPathList << s.reader.path();
-			scriptSaveIndexList << s.saveIndex;
-		}
-		writer(scriptPathList);
-		writer(scriptSaveIndexList);
-		Console << scriptSaveIndexList;
-
-		writer(operateLine);
-		writer(nowName);
-
-		writer(forSaveGraphics); //画像をシリアライズして保存はできないので、画像そのものではなく画像情報を保存
-
-		// 変数書き込み
-		/*
-		Array<VariableKey> k_tmp;
-		Array<v_type> v_tmp;
-		Array<String> t_tmp;
-		for (auto [k, v] : variable) {
-			k_tmp << k;
-			v_tmp << v;
-			if (auto* p = std::get_if<int32>(&v)) {
-				t_tmp << U"int";
-			}
-			else if (auto* p = std::get_if<String>(&v)) {
-				t_tmp << U"string";
-			}
-			else if (auto* p = std::get_if<double>(&v)) {
-				t_tmp << U"double";
-			}
-			else if (auto* p = std::get_if<bool>(&v)) {
-				t_tmp << U"bool";
-			}
-			else if (auto* p = std::get_if<Point>(&v)) {
-				t_tmp << U"point";
-			}
-		}
-
-		writer(t_tmp); //保存する変数の型のリスト
-		for (auto i : step(k_tmp.size())) {
-			writer(k_tmp[i]); // 変数名
-			std::visit([&writer](auto& x) {
-				writer(x); // 値
-			}, v_tmp[i]);
-		}
-		// -------
-		*/
-
-		Print << U"Saved!";
+		dataSave();
 	}
 
 	// クイックロード
 	if (KeyL.down()) {
-		Deserializer<BinaryReader> reader{ savefile };
-		if (!reader) throw Error{ U"Failed to open SaveFile" };
-
-		scriptStack = {};
-		Array<FilePath> scriptPathList;
-		Array<size_t> scriptSaveIndexList;
-		reader(scriptPathList);
-		reader(scriptSaveIndexList);
-		Console << scriptSaveIndexList;
-		for (auto i : step(scriptPathList.size())) {
-			TextReader tr{ scriptPathList[i] };
-			size_t index = scriptSaveIndexList[i];
-			if (!tr) throw Error{ U"Failed to open `{}`"_fmt(scriptPathList[i]) };
-
-			for (auto j : step(index)) {
-				tr.readLine();
-			}
-
-			scriptStack << ScriptData{tr, index, index};
-		}
-
-		reader(operateLine);
-		reader(nowName);
-
-		reader(forSaveGraphics); //画像情報をロード
-		processStack.back().graphics.clear();
-		// graphics.clear();
-		for (auto itr = forSaveGraphics.begin(); itr != forSaveGraphics.end(); ++itr) {
-			processStack.back().graphics << std::make_shared<Graphic>(*itr);
-		}
-
-		for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
-			(*itr)->setTexture();
-		}
-
-		/*
-		variable.clear();
-		Array<String> typeList;
-		reader(typeList); //変数リスト
-		for (String t : typeList) {
-			VariableKey k;
-			v_type v;
-
-			reader(k);
-			if (t == U"int") {
-				int32 _;
-				reader(_);
-				v = _;
-			}
-			else if (t == U"string") {
-				String _;
-				reader(_);
-				v = _;
-			}
-			else if (t == U"bool") {
-				bool _;
-				reader(_);
-				v = _;
-			}
-			else if (t == U"double") {
-				double _;
-				reader(_);
-				v = _;
-			}
-			else if (t == U"point") {
-				Point _;
-				reader(_);
-				v = _;
-			}
-
-			variable[k] = v;
-		}
-		*/
-
-		// 実行中の各種処理を初期化
-		resetTextWindow({});
-
-		processStack.back().subList.clear();
-		// subProcesses.clear();
-
-		Print << U"Loaded!";
-
-		// 改めて読み込み開始
-		readScript();
+		dataLoad();
 	}
 
+	// リロード（デバッグ用）
 	if (KeyR.down()) {
 		changeScene(GameScene::Engine);
 	}
@@ -1620,13 +1458,18 @@ void Engine::draw() const {
 
 	if (isShowingVariable) {
 		Print << U"-------------";
-		Print << U"Variable";
-		for (auto [k, v] : vars) {
+		Print << U"Temporary Variable";
+		for (auto [k, v] : getData().tmp_vars) {
+			Print << k << U" : " << getVariableList(v->value);
+		}
+		Print << U"";
+		Print << U"Savedata Variable";
+		for (auto [k, v] : getData().savedata_vars) {
 			Print << k << U" : " << getVariableList(v->value);
 		}
 		Print << U"";
 		Print << U"System Variable";
-		for (auto [k, v] : getData().systemVars) {
+		for (auto [k, v] : getData().system_vars) {
 			Print << k << U" : " << getVariableList(v->value);
 		}
 		Print << U"-------------";
@@ -1693,9 +1536,278 @@ String Engine::getVariableList(std::any arg) const {
 	}
 }
 
+void Engine::dataSave() {
+	Serializer<BinaryWriter> writer{ savefile };
+	if (!writer) throw Error{U"Failed to open SaveFile"};
+
+	// script
+	Array<FilePath> scriptPathList;
+	Array<size_t> scriptSaveIndexList;
+	for (auto s : scriptStack) {
+		scriptPathList << s.reader.path();
+		scriptSaveIndexList << s.saveIndex;
+	}
+	writer(scriptPathList);
+	writer(scriptSaveIndexList);
+
+	Array<bool> saveflagList = {};
+	bool s_flag = true; // 一個前の処理のがセーブしないものならそれ以降もセーブしない、それ用のフラグ
+	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
+		if (!itr->saveFlag || !s_flag) {
+			s_flag = false;
+		}
+		saveflagList << s_flag;
+	}
+	writer(saveflagList);
+
+	// 画像系がどのクラスかを調べる
+	Array<Array<String>> graphicsTypeList = {};
+	// bool s_flag = true; // 一個前の処理のがセーブしないものならそれ以降もセーブしない、それ用のフラグ
+	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
+		if (!itr->saveFlag || !s_flag) {
+			s_flag = false;
+			continue;
+		}
+
+		Array<String> gtl_tmp = {};
+		for (auto itr2 = itr->graphics.begin(); itr2 != itr->graphics.end(); ++itr2) {
+			if (typeid(*(*itr2)) == typeid(Engine::Graphic)) {
+				gtl_tmp << U"Graphic";
+			}
+			else if (typeid(*(*itr2)) == typeid(Engine::Button)) {
+				gtl_tmp << U"Button";
+			}
+		}
+		graphicsTypeList << gtl_tmp;
+	}
+	writer(graphicsTypeList);
+
+	// 画像情報保存
+	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
+		if (!itr->saveFlag) continue;
+
+		Array<String> gt = graphicsTypeList.front();
+		for (auto itr2 = itr->graphics.begin(); itr2 != itr->graphics.end(); ++itr2) {
+			if (gt.front() == U"Graphic") {
+				shared_ptr<Graphic> sp = *itr2;
+				writer(*sp);
+			}
+			if (gt.front() == U"Button") {
+				shared_ptr<Button> sp = std::dynamic_pointer_cast<Button>(*itr2);
+				writer(*sp);
+			}
+			gt.pop_front();
+		}
+	}
+
+	// メッセージウィンドウ情報保存
+	writer(messagePos);
+	writer(namePos);
+	writer(defaultMessageSize);
+	writer(defaultNameSize);
+	writer(layer);
+	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
+		if (!itr->saveFlag) continue;
+		writer(itr->windowText);
+	}
+
+	writer(musicPath);
+
+
+	// 変数書き込み
+	/*
+	Array<VariableKey> k_tmp;
+	Array<v_type> v_tmp;
+	Array<String> t_tmp;
+	for (auto [k, v] : variable) {
+		k_tmp << k;
+		v_tmp << v;
+		if (auto* p = std::get_if<int32>(&v)) {
+			t_tmp << U"int";
+		}
+		else if (auto* p = std::get_if<String>(&v)) {
+			t_tmp << U"string";
+		}
+		else if (auto* p = std::get_if<double>(&v)) {
+			t_tmp << U"double";
+		}
+		else if (auto* p = std::get_if<bool>(&v)) {
+			t_tmp << U"bool";
+		}
+		else if (auto* p = std::get_if<Point>(&v)) {
+			t_tmp << U"point";
+		}
+	}
+
+	writer(t_tmp); //保存する変数の型のリスト
+	for (auto i : step(k_tmp.size())) {
+		writer(k_tmp[i]); // 変数名
+		std::visit([&writer](auto& x) {
+			writer(x); // 値
+		}, v_tmp[i]);
+	}
+	// -------
+	*/
+
+	Print << U"Saved!";
+
+	/* セーブデータ構造
+	*
+	* scriptPathList
+	* scriptSaveIndexList
+	* saveflagList
+	* graphicsTypeList
+	*
+	* graphics1_1 graphics1_2 ... graphics1_M
+	* graphics2_1 graphics2_2 ... graphics2_M
+	*     .
+	*     .
+	*     .
+	* graphicsN_1 graphicsN_2 ... graphicsN_M
+	*
+	* messagePos namePos defaultMessageSize defaultNameSize layer
+	*
+	* windowText1
+	* windowText2
+	*     .
+	*     .
+	*     .
+	* windowTextN
+	*
+	* nowMusic
+	*/
+}
+
+void Engine::dataLoad() {
+	Deserializer<BinaryReader> reader{ savefile };
+	if (!reader) throw Error{ U"Failed to open SaveFile" };
+
+	scriptStack = {};
+	Array<FilePath> scriptPathList;
+	Array<size_t> scriptSaveIndexList;
+	reader(scriptPathList);
+	reader(scriptSaveIndexList);
+	for (auto i : step(scriptPathList.size())) {
+		TextReader tr{ scriptPathList[i] };
+		size_t index = scriptSaveIndexList[i];
+		if (!tr) throw Error{ U"Failed to open `{}`"_fmt(scriptPathList[i]) };
+
+		for (auto j : step(index)) {
+			tr.readLine();
+		}
+
+		scriptStack << ScriptData{tr, index, index};
+	}
+
+	Array<bool> saveflagList = {};
+	reader(saveflagList);
+
+	// 画像系
+	Array<Array<String>> graphicsTypeList = {};
+	reader(graphicsTypeList);
+
+	processStack.clear();
+	for (auto [index, e] : Indexed(saveflagList)) {
+		if (!e) continue;
+		processStack << Process{e};
+
+		for (auto itr = graphicsTypeList.at(index).begin(); itr != graphicsTypeList.at(index).end(); ++itr) {
+			if (*itr == U"Graphic") {
+				Graphic gr;
+				reader(gr);
+				gr.setTexture();
+				processStack.back().graphics << std::make_shared<Graphic>(gr);
+			}
+			else if (*itr == U"Button") {
+				Button bu;
+				reader(bu);
+				bu.setTexture();
+				bu.setEnginePointer(this);
+				processStack.back().graphics << std::make_shared<Button>(bu);
+			}
+		}
+	}
+
+	Console << U"graphic loaded";
+
+	// メッセージウィンドウ
+	reader(messagePos);
+	reader(namePos);
+	reader(defaultMessageSize);
+	reader(defaultNameSize);
+	reader(layer);
+	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
+		WindowText wt;
+		reader(wt);
+		itr->windowText = wt;
+		itr->windowText.index = 0;
+		itr->windowText.time = 0;
+	}
+
+	Console << U"message loaded";
+
+	reader(musicPath);
+	nowMusic.stop();
+	if (musicPath) {
+		Audio a{ Audio::Stream, musicPath };
+		a.play(MixBus0);
+	}
+
+	/*
+	variable.clear();
+	Array<String> typeList;
+	reader(typeList); //変数リスト
+	for (String t : typeList) {
+		VariableKey k;
+		v_type v;
+
+		reader(k);
+		if (t == U"int") {
+			int32 _;
+			reader(_);
+			v = _;
+		}
+		else if (t == U"string") {
+			String _;
+			reader(_);
+			v = _;
+		}
+		else if (t == U"bool") {
+			bool _;
+			reader(_);
+			v = _;
+		}
+		else if (t == U"double") {
+			double _;
+			reader(_);
+			v = _;
+		}
+		else if (t == U"point") {
+			Point _;
+			reader(_);
+			v = _;
+		}
+
+		variable[k] = v;
+	}
+	*/
+
+	// 実行中の各種処理を初期化
+	// resetTextWindow({});
+	sentenceStorage = U"";
+
+	// processStack.back().subList.clear();
+	// subProcesses.clear();
+
+	Print << U"Loaded!";
+
+	// 改めて読み込み開始
+	readScript();
+}
+
 void Engine::WindowText::draw() const {
 	FontAsset(U"Medium{}"_fmt(defaultNameSize))(name).draw(namePos, Palette::White);
-	FontAsset(U"Medium{}"_fmt(defaultMessageSize))(message.substr(0, index + 1)).draw(messagePos, Palette::White);
+	FontAsset(U"Medium{}"_fmt(defaultMessageSize))(message.substr(0, index)).draw(messagePos, Palette::White);
 }
 
 void Engine::Graphic::update() {}
@@ -1756,4 +1868,55 @@ void Engine::Button::draw() const {
 	}
 
 	if (texture || hover || click) tr.draw(position);
+}
+
+void Engine::InputProcess::init(Engine* e) {
+	engine = e;
+	input = ElephantLib::stringToInput[who];
+}
+
+void Engine::InputProcess::invoke() {
+	if (input.down()) {
+		engine->interprete(down_exp);
+
+		auto [reader, i] = engine->getDistination(link, dst);
+		if (jumptype) {
+			if (jumptype == U"goto") {
+				engine->scriptStack.pop_back();
+			}
+			engine->scriptStack << ScriptData{reader, i, i};
+			if (engine->isStopNow) {
+				engine->processStack.back().mainStack.pop_front();
+				engine->initMainProcess();
+				engine->isStopNow = false;
+			}
+		}
+	}
+	if (input.pressed()) {
+		engine->interprete(press_exp);
+	}
+	if (input.up()) {
+		engine->interprete(up_exp);
+	}
+}
+
+void Engine::GetDurationProcess::init(Engine* e) {
+	engine = e;
+	input = ElephantLib::stringToInput[who];
+}
+
+void Engine::GetDurationProcess::invoke() {
+	double s = input.pressedDuration() / 1s;
+	engine->interprete(U"{} = {}"_fmt(var, s));
+}
+
+void Engine::MouseWheelScrollProcess::init(Engine* e) {
+	engine = e;
+}
+
+void Engine::MouseWheelScrollProcess::invoke() {
+	engine->interprete(U"{} = {}"_fmt(var, Mouse::Wheel()));
+	if (Mouse::Wheel() != 0.0) {
+		engine->interprete(exp);
+	}
 }

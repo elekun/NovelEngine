@@ -64,12 +64,12 @@ public:
 	Array<shared_ptr<Token>> body;
 	shared_ptr<Scope> grobal;
 	shared_ptr<Scope> local;
-	shared_ptr<Scope> system;
-	shared_ptr<Scope> temporary;
+	shared_ptr<Scope> system_var;
+	shared_ptr<Scope> savedata_var;
 
 	Interpreter(){};
-	Interpreter& init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs, HashTable<String, shared_ptr<Variable>> svs);
-	std::tuple<HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>> run();
+	Interpreter& init(Array<shared_ptr<Token>> b, HashTable<String, shared_ptr<Variable>> vs, HashTable<String, shared_ptr<Variable>> svs, HashTable<String, shared_ptr<Variable>> gvs);
+	std::tuple<HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>, HashTable<String, shared_ptr<Variable>>> run();
 	std::any getValue();
 	bool evalExpression();
 	std::any process(Array<shared_ptr<Token>> b, Optional<bool>& ret, Optional<bool>& brk);
@@ -100,9 +100,7 @@ public:
 	int32 toInt(bool b);
 	std::any while_(shared_ptr<Token> token, Optional<bool>& ret);
 	std::any var(shared_ptr<Token> token);
-	shared_ptr<Variable> newVariable(String name);
-	std::any system_(shared_ptr<Token> token);
-	shared_ptr<Variable> newSystemVariable(String name);
+	shared_ptr<Variable> newVariable(String name, String type);
 	shared_ptr<DynamicFunc> fexpr(shared_ptr<Token> token);
 	std::any str(shared_ptr<Token> token);
 	std::any blank(shared_ptr<Token> token);

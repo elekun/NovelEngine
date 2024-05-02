@@ -17,7 +17,6 @@ public:
 
 private:
 	// ゲーム内変数
-	HashTable<String, shared_ptr<Variable>> vars;
 	v_type stringToVariable(String type = U"string", String v = U"");
 
 	// 汎用関数
@@ -51,7 +50,7 @@ private:
 	void skipLineForIf();
 
 	// 全処理共通変数
-	String operateLine; // 要らないかも。要検討
+	// String operateLine; // 要らないかも。要検討
 	bool isStopNow;
 	void initMainProcess();
 	bool exeMainProcess();
@@ -85,12 +84,14 @@ private:
 		WindowText(Point mp, Point np, int32 ms, int32 ns, int32 l)
 			: messagePos(mp), namePos(np), defaultMessageSize(ms), defaultNameSize(ns), layer(l), index(0), indexCT(0.0), message(U""), name(U""), time(0.0) {};
 		void draw() const;
+
+		template <class Archive>
+		void SIV3D_SERIALIZE(Archive& archive) { archive(messagePos, namePos, defaultMessageSize, defaultNameSize, layer, index, indexCT, message, name); };
 	};
 
 	String sentenceStorage;
 	bool checkAuto;
 
-	String nowName; // 今表示される名前
 	void resetTextWindow(Array<String> strs);
 
 	// 画面全体処理
@@ -163,9 +164,10 @@ private:
 		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };
 		void setNextPath(String p, String h, String c) { nextPath = p; nextHoverPath = h; nextClickPath = c; };
 		void setNextTexture() { nextTexture = Texture{ nextPath }; nextHover = Texture{ nextHoverPath }; nextClick = Texture{ nextClickPath }; };
+		void setEnginePointer(Engine* en) { engine = en; };
 
 		template <class Archive>
-		void SIV3D_SERIALIZE(Archive& archive) { archive(path, position, size, scale, opacity, layer, tag); };
+		void SIV3D_SERIALIZE(Archive& archive) { archive(path, position, size, scale, opacity, layer, tag, hoverPath, clickPath, expr, role, jumptype, link, dst); };
 
 		void changeTexture() override {
 			path = nextPath; texture = nextTexture; nextPath = U""; nextTexture = Texture{ U"" };
@@ -214,6 +216,56 @@ private:
 
 
 	Audio nowMusic; // BGM
+	FilePath musicPath;
+
+	// 継続する処理（入力受付処理など）
+	struct ContinueProcess {
+	public:
+		ContinueProcess() {};
+		Engine* engine;
+		virtual void invoke() {};
+	};
+
+	struct InputProcess : public ContinueProcess {
+	public:
+		String who;
+		String down_exp, press_exp, up_exp;
+		String jumptype;
+		String link;
+		String dst;
+		Input input;
+
+		InputProcess() {};
+		InputProcess(String w, String de, String pe, String ue, String jt, String l, String d)
+			: who(w), down_exp(de), press_exp(pe), up_exp(ue), jumptype(jt), link(l), dst(d){};
+		void init(Engine* e);
+		void invoke() override;
+	};
+
+	struct GetDurationProcess : public ContinueProcess {
+	public:
+		String who;
+		String var;
+		Input input;
+
+		GetDurationProcess() {};
+		GetDurationProcess(String w, String v) : who(w), var(v) {};
+		void init(Engine* e);
+		void invoke() override;
+	};
+
+	struct MouseWheelScrollProcess : public ContinueProcess {
+	public:
+		String var;
+		String exp;
+		Input input;
+
+		MouseWheelScrollProcess() {};
+		MouseWheelScrollProcess(String v, String e) : var(v), exp(e) {};
+		void init(Engine* e);
+		void invoke() override;
+	};
+
 
 	struct Process {
 	public:
@@ -221,12 +273,16 @@ private:
 		Process(bool sf) : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(sf) {};
 		Array<std::function<bool()>> mainStack; // メイン処理のキュー
 		Array<std::function<bool()>> subList; // サブ処理のリスト
+		Array<std::shared_ptr<ContinueProcess>> continueList; // 継続処理のリスト
 		Array<std::shared_ptr<Graphic>> graphics; // 画像
 		Array<Audio> sounds; // 効果音
 
 		WindowText windowText;
 
 		bool saveFlag;
+
+		// template <class Archive>
+		// void SIV3D_SERIALIZE(Archive& archive) { archive(graphics, windowText); };
 	};
 	Array<Process> processStack; // 全処理のスタック（update()を実行しない、描画はする）
 
@@ -234,8 +290,10 @@ private:
 
 	// データセーブ用
 	FilePath savefile;
-	Array<Graphic> forSaveGraphics;
+	Array<Process> saveProcessStack;
 	void setSaveVariable();
+	void dataSave();
+	void dataLoad();
 
 	// デバッグ用
 	bool isShowingLog;
