@@ -35,6 +35,7 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 	savefile = U"./test_save.dat";
 
 	musicPath = U"";
+	ambientPath = U"";
 
 	proceedInput = MouseL | KeyEnter | KeySpace;
 }
@@ -275,8 +276,8 @@ void Engine::readScript() {
 	Array<String> pn = {
 		U"start", U"name",
 		U"mes_config",
-		U"setimg", U"setbtn", U"change", U"moveto", U"moveby", U"delete",
-		U"music", U"sound", U"volmusic", U"volsound",
+		U"setimg", U"setbtn", U"setsldr", U"change", U"moveto", U"moveby", U"delete",
+		U"music", U"sound", U"ambient", U"volmusic", U"volsound", U"volambient",
 		U"wait", U"stop", U"scenechange", U"exit",
 		U"choice", U"goto", U"call", U"return",
 		U"if", U"elif", U"else",U"endif",
@@ -683,6 +684,71 @@ void Engine::readScript() {
 					addSubProcess(f());
 				}
 
+				if (op == U"setsldr") {
+					String n = U"";
+					FilePath knob = U"", back = U"", back_sub = U"";
+					Point p = Point::Zero();
+					int32 l = 0;
+					int32 max = 0, min = 0, def = 0;
+					Size ksi = Size::Zero(), bsi = Size::Zero();
+					String e = U"";
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+						if (option == U"knob") {
+							setArgument(op, option, knob, arg);
+						}
+						if (option == U"back") {
+							setArgument(op, option, back, arg);
+						}
+						if (option == U"back_sub") {
+							setArgument(op, option, back_sub, arg);
+						}
+						if (option == U"pos") {
+							setArgument(op, option, p, arg);
+						}
+						if (option == U"max") {
+							setArgumentParse(op, option, max, arg);
+						}
+						if (option == U"min") {
+							setArgumentParse(op, option, min, arg);
+						}
+						if (option == U"default") {
+							setArgumentParse(op, option, def, arg);
+						}
+						if (option == U"knob_size") {
+							setArgument(op, option, ksi, arg);
+						}
+						if (option == U"back_size") {
+							setArgument(op, option, bsi, arg);
+						}
+						if (option == U"layer") {
+							setArgument(op, option, l, arg);
+						}
+						if (option == U"exp") {
+							setArgument(op, option, e, arg);
+						}
+					}
+
+					//画像サイズの計算のために一時的にImageを作成
+					ksi = ksi.isZero() ? Image{ knob }.size() : ksi;
+					bsi = bsi.isZero() ? Image{ back }.size() : bsi;
+					auto s = std::make_shared<Slider>(Slider{ knob, back, back_sub, p, ksi, bsi, l, n, max, min, def, e, this });
+
+
+					std::function<std::function<bool()>()> f = [&, this, silder = s, _n = n]() {
+						processStack.back().graphics.emplace_back(silder);
+						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+						return [&, this, tag = _n]() mutable {
+							return true;
+						};
+					};
+
+					addSubProcess(f());
+				}
+
 				if (op == U"change") {
 					String n; // タグの名前
 					FilePath fp;
@@ -912,18 +978,40 @@ void Engine::readScript() {
 				if (op == U"music") {
 					//filepath, ...option
 					FilePath fp;
+					bool l = false;
+					double st = 0.0, lst = -1.0, led = -1.0;
 					for (auto [option, arg] : args) {
 						if (option == U"path") {
 							setArgument(op, option, fp, arg);
 						}
+						if (option == U"loop") {
+							setArgument(op, option, l, arg);
+						}
+						if (option == U"startpos") {
+							setArgument(op, option, st, arg);
+						}
+						if (option == U"loopstartpos") {
+							setArgument(op, option, lst, arg);
+						}
+						if (option == U"loopendpos") {
+							setArgument(op, option, led, arg);
+						}
 					}
-					Audio a{ Audio::Stream, fp };
+
+					Audio a;
+					if (lst < 0 || led < 0 || lst >= led) {
+						a = Audio{ fp, l };
+					}
+					else {
+						a = Audio{ fp, Arg::loopBegin = lst * 1.0s, Arg::loopEnd = led * 1.0s };
+					}
 					musicPath = fp;
 
-					std::function<std::function<bool()>()> f = [&, this, _a = a]() {
+					std::function<std::function<bool()>()> f = [&, this, _a = a, _st = st]() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
 							nowMusic = audio;
+							nowMusic.seekTime(_st);
 							nowMusic.play(MixBus0);
 							return true;
 						};
@@ -954,6 +1042,51 @@ void Engine::readScript() {
 					addSubProcess(f());
 				}
 
+				if (op == U"ambient") {
+					//filepath, ...option
+					FilePath fp;
+					bool l = false;
+					double st = 0.0, lst = -1.0, led = -1.0;
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
+						if (option == U"loop") {
+							setArgument(op, option, l, arg);
+						}
+						if (option == U"startpos") {
+							setArgument(op, option, st, arg);
+						}
+						if (option == U"loopstartpos") {
+							setArgument(op, option, lst, arg);
+						}
+						if (option == U"loopendpos") {
+							setArgument(op, option, led, arg);
+						}
+					}
+
+					Audio a;
+					if (lst < 0 || led < 0 || lst >= led) {
+						a = Audio{ fp, l };
+					}
+					else {
+						a = Audio{ fp, Arg::loopBegin = lst * 1.0s, Arg::loopEnd = led * 1.0s };
+					}
+					ambientPath = fp;
+
+					std::function<std::function<bool()>()> f = [&, this, _a = a, _st = st]() {
+						double time = 0.0;
+						return [&, this, audio = _a, time]() mutable {
+							nowAmbient = audio;
+							nowAmbient.seekTime(_st);
+							nowAmbient.play(MixBus2);
+							return true;
+						};
+					};
+
+					addSubProcess(f());
+				}
+
 				if (op == U"volmusic") {
 					double v = 1.0;
 					for (auto [option, arg] : args) {
@@ -972,6 +1105,16 @@ void Engine::readScript() {
 						}
 					}
 					GlobalAudio::BusSetVolume(MixBus1, v);
+				}
+
+				if (op == U"volambient") {
+					double v = 1.0;
+					for (auto [option, arg] : args) {
+						if (option == U"volume") {
+							setArgument(op, option, v, arg);
+						}
+					}
+					GlobalAudio::BusSetVolume(MixBus2, v);
 				}
 
 				if (op == U"wait") {
@@ -1486,7 +1629,6 @@ void Engine::draw() const {
 			nowlayer = (*itr)->getLayer();
 			if (!messageDrawFlag && i == processStack.size() - 1) {
 				if (prevlayer <= meslayer && meslayer < nowlayer) {
-					Console << U"message";
 					processStack.back().windowText.draw();
 					messageDrawFlag = true;
 				}
@@ -1577,6 +1719,9 @@ void Engine::dataSave() {
 			else if (typeid(*(*itr2)) == typeid(Engine::Button)) {
 				gtl_tmp << U"Button";
 			}
+			else if (typeid(*(*itr2)) == typeid(Engine::Slider)) {
+				gtl_tmp << U"Slider";
+			}
 		}
 		graphicsTypeList << gtl_tmp;
 	}
@@ -1594,6 +1739,10 @@ void Engine::dataSave() {
 			}
 			if (gt.front() == U"Button") {
 				shared_ptr<Button> sp = std::dynamic_pointer_cast<Button>(*itr2);
+				writer(*sp);
+			}
+			if (gt.front() == U"Slider") {
+				shared_ptr<Slider> sp = std::dynamic_pointer_cast<Slider>(*itr2);
 				writer(*sp);
 			}
 			gt.pop_front();
@@ -1724,6 +1873,13 @@ void Engine::dataLoad() {
 				bu.setTexture();
 				bu.setEnginePointer(this);
 				processStack.back().graphics << std::make_shared<Button>(bu);
+			}
+			else if (*itr == U"Slider") {
+				Slider sl;
+				reader(sl);
+				sl.setTexture();
+				sl.setEnginePointer(this);
+				processStack.back().graphics << std::make_shared<Slider>(sl);
 			}
 		}
 	}
@@ -1868,6 +2024,26 @@ void Engine::Button::draw() const {
 	}
 
 	if (texture || hover || click) tr.draw(position);
+}
+
+void Engine::Slider::update() {
+	int32 width = backSize.x / (max - min);
+	for (auto i : step(max - min + 1)) {
+		if (MouseL.down() && Rect{ (position + Vec2(width * (i - 0.5), 0)).asPoint(), width, backSize.y}.mouseOver()) {
+			now = i;
+			Console << U"test" <<  now;
+		}
+	}
+
+	engine->interprete(U"{} = {}"_fmt(expr, now));
+}
+
+void Engine::Slider::draw() const {
+	back.resized(backSize).draw(position);
+	backSub.resized(backSize).draw(position);
+
+	int32 width = backSize.x / (max - min);
+	texture.resized(size).drawAt((position + Vec2(width * (now - min), backSize.y / 2)).asPoint());
 }
 
 void Engine::InputProcess::init(Engine* e) {

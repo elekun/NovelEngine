@@ -135,7 +135,7 @@ private:
 		virtual void changeTexture() { path = nextPath; texture = nextTexture; nextPath = U""; nextTexture = Texture{ U"" }; };
 
 		virtual void update();
-		void draw() const;
+		virtual void draw() const;
 	};
 	class Button : public Graphic{
 	protected:
@@ -158,7 +158,7 @@ private:
 	public:
 		Button() : Graphic{} {};
 		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, String jt, String li, String d, Engine* en) :
-			hoverPath(h), clickPath(c), expr(e), role(r), engine(en), jumptype(jt), link(li), dst(d), Graphic{n, p, s, sc, o, l, t} {};
+			hover(Texture{ h }), hoverPath(h), click(Texture{ c }), clickPath(c), expr(e), role(r), engine(en), jumptype(jt), link(li), dst(d), Graphic{n, p, s, sc, o, l, t} {};
 
 		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };
 		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };
@@ -176,7 +176,34 @@ private:
 		};
 
 		void update() override;
-		void draw() const;
+		void draw() const override;
+	};
+	class Slider : public Graphic {
+	protected:
+		Texture back;
+		FilePath backPath;
+		Texture backSub;
+		FilePath backSubPath;
+		Size backSize;
+		String expr; // クリック時に動作するスクリプト
+		Engine* engine;
+		int32 max;
+		int32 min;
+		int32 now;
+	public:
+		Slider() : Graphic{} {};
+		Slider(FilePath k, FilePath b, FilePath bs, Vec2 p, Size s, Size bsi, int32 l, String t, int32 ma, int32 mi, int32 de, String e, Engine* en) :
+			back(Texture{ b }), backPath(b), backSub(Texture{ bs }), backSubPath(bs), backSize(bsi), max(ma), min(mi), now(de), expr(e), engine(en), Graphic{k, p, s, 1.0, 1.0, l, t} {};
+
+		void setPath(String kp, String bp, String bsp) { path = kp; backPath = bp; backSubPath = bsp; };
+		void setTexture() override { texture = Texture{ path }; back = Texture{ backPath }; backSub = Texture{ backSubPath }; };
+		void setEnginePointer(Engine* en) { engine = en; };
+
+		template <class Archive>
+		void SIV3D_SERIALIZE(Archive& archive) { archive(path, position, size, scale, opacity, layer, tag, backPath, backSubPath, backSize, expr, max, min, now); };
+
+		void update() override;
+		void draw() const override;
 	};
 
 	// 選択肢ボタン用変数
@@ -217,6 +244,8 @@ private:
 
 	Audio nowMusic; // BGM
 	FilePath musicPath;
+	Audio nowAmbient; // 環境音楽
+	FilePath ambientPath;
 
 	// 継続する処理（入力受付処理など）
 	struct ContinueProcess {
