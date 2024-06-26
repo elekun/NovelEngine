@@ -19,9 +19,9 @@ void registerPixelShaderAsset() {
 
 
 void Main() {
-	Window::Resize(1280, 720);
+	Window::Resize(1800, 1080);
 	Scene::SetResizeMode(ResizeMode::Keep);
-	Window::Resize(1280, 720);
+	Window::Resize(1200, 720);
 
 	Window::SetTitle(U"Test Novel Engine");
 

@@ -10,7 +10,7 @@ using namespace ElephantLib;
 
 Engine::Engine(const InitData& init) : IScene{ init } {
 
-	Console << U"script path :" << getData().scriptPath;
+	// Console << U"script path :" << getData().scriptPath;
 
 	TextReader reader{ getData().scriptPath };
 	if (!reader) {
@@ -21,10 +21,11 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 
 	readStopFlag = false;
 
-	processStack << Process{true};
-
 	isStopNow = false;
-	initMainProcess();
+	processStack << Process{true, false};
+	std::function<bool()> init_mainProcess = [&, this]() { return true; };
+	processStack.back().mainStack.emplace_back(std::make_shared<std::function<bool()>>(init_mainProcess));
+
 	fadeProcess = [&, this]() {};
 
 	isShowSelection = false;
@@ -37,7 +38,9 @@ Engine::Engine(const InitData& init) : IScene{ init } {
 	musicPath = U"";
 	ambientPath = U"";
 
-	proceedInput = MouseL | KeyEnter | KeySpace;
+	proceedInput = MouseL | KeyEnter;
+
+	isClosed = false;
 }
 
 v_type Engine::stringToVariable(String type, String v) {
@@ -262,21 +265,23 @@ void Engine::readScript() {
 		return args;
 	};
 
-	auto setMainProcess = [&, this](std::function<bool()> f) {
-		processStack.back().mainStack << f;
+	auto setMainProcess = [&, this](std::function<bool()> &f) {
+		processStack.back().mainStack.emplace_back(std::make_shared<std::function<bool()>>(f));
+		// processStack.back().mainStack << f;
 		//mainProcess << f;
 		readStopFlag = true;
 	};
 
-	auto addSubProcess = [&, this](std::function<bool()> f) {
-		processStack.back().subList.emplace_back(f);
+	auto addSubProcess = [&, this](std::function<bool()> &f) {
+		processStack.back().subList.emplace_back(std::make_shared<std::function<bool()>>(f));
 	};
 
 	// 命令
 	Array<String> pn = {
 		U"start", U"name",
-		U"mes_config",
+		U"mes_config", U"mes_link", U"mes_unlink", U"wait_icon",
 		U"setimg", U"setbtn", U"setsldr", U"change", U"moveto", U"moveby", U"delete",
+		U"setchar", U"spaeakchar", U"silentchar", 
 		U"music", U"sound", U"ambient", U"volmusic", U"volsound", U"volambient",
 		U"wait", U"stop", U"scenechange", U"exit",
 		U"choice", U"goto", U"call", U"return",
@@ -336,24 +341,34 @@ void Engine::readScript() {
 			if (sentenceStorage != U"") {
 				processStack.back().windowText.message = eraseBackChar(sentenceStorage, U'\n'); // 末尾の改行を削除
 				processStack.back().windowText.indexCT = 0.05;
+				scenarioLog << processStack.back().windowText.message;
 
 				std::function<bool()> f = [&, this]() {
 
 					processStack.back().windowText.time += Scene::DeltaTime();
 
+					if (getData().isSkip) {
+						processStack.back().windowText.index = processStack.back().windowText.message.size();
+						if (processStack.back().windowText.time >= 0.1) {
+							resetTextWindow();
+							setSaveVariable();
+							return true;
+						}
+					}
+
 					if (getData().isAuto) {
 						if (processStack.back().windowText.time >= processStack.back().windowText.indexCT * 20) {
-							resetTextWindow({ processStack.back().windowText.message });
+							resetTextWindow();
 							setSaveVariable();
 							return true;
 						}
 					}
 					else {
 						// 左クリックorスペースで
-						if (proceedInput.down()) {
+						if (proceedInput.down() && allowTextSkip) {
 							// 最後まで文字が表示されているなら次に行く
 							if (processStack.back().windowText.index >= processStack.back().windowText.message.size()) {
-								resetTextWindow({ processStack.back().windowText.message });
+								resetTextWindow();
 								setSaveVariable();
 								return true;
 							}
@@ -369,6 +384,8 @@ void Engine::readScript() {
 					if (!selections.isEmpty() && processStack.back().windowText.index >= processStack.back().windowText.message.size()) {
 						// 選択肢を表示しておく
 						isShowSelection = true;
+						// スキップは解除
+						getData().isSkip = false;
 						return true;
 					}
 
@@ -390,12 +407,14 @@ void Engine::readScript() {
 				if (processStack.back().windowText.message == U"") {
 					isShowSelection = true;
 				}
-				std::function<std::function<bool()>()> f = [&, this]() {
+				std::function<bool()> f = [&, this]() {
 					bool isClicked = false;
 					return [&, this]() mutable {
 						for (auto itr = selections.begin(); itr != selections.end(); ++itr) {
 							if (Rect{ itr->pos, itr->size }.leftReleased() && isClicked) {
-								resetTextWindow({ processStack.back().windowText.message, U"choiced : " + itr->text });
+								resetTextWindow();
+								scenarioLog << U"choiced : " + itr->text;
+
 								setSaveVariable();
 								isShowSelection = false;
 
@@ -415,8 +434,8 @@ void Engine::readScript() {
 
 						return false;
 					};
-				};
-				setMainProcess(f());
+				}();
+				setMainProcess(f);
 			}
 		}
 
@@ -444,7 +463,7 @@ void Engine::readScript() {
 						Rect{ Point::Zero(), Scene::Size() }.draw(ColorF{ 0.0, 0.0, 0.0, 1.0 - sceneFade });
 					};
 
-					std::function<std::function<bool()>()> f = [&, this, _d = d]() {
+					std::function<bool()> f = [&, this, _d = d]() {
 						double time = 0.0;
 
 						return [&, this, time, duration = _d]() mutable {
@@ -458,12 +477,12 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
-					addSubProcess(f());
+					}();
+					addSubProcess(f);
 					// subProcesses.emplace_back(f());
 
 					// 強制待機
-					std::function<std::function<bool()>()> w = [&, this, _d = d]() {
+					std::function<bool()> w = [&, this, _d = d]() {
 						double time = 0.0;
 						return [&, this, time, duration = _d]() mutable {
 							if (time >= duration) {
@@ -473,8 +492,8 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
-					setMainProcess(w());
+					}();
+					setMainProcess(w);
 				}
 
 				if (op == U"name") {
@@ -494,36 +513,84 @@ void Engine::readScript() {
 				}
 
 				if (op == U"mes_config") {
-					Point mp = Point::Zero(), np = Point::Zero();
+					Point p = Point::Zero(), mo = Point::Zero(), no = Point::Zero();
 					int32 ms = 0, ns = 0;
 					int32 l = 0;
+					FilePath fp, bgp;
+					int32 lb = 0;
+
 					for (auto [option, arg] : args) {
-						if (option == U"mes_pos") {
-							setArgument(op, option, mp, arg);
-							messagePos = mp;
-							processStack.back().windowText.messagePos = mp;
+						if (option == U"pos") {
+							setArgument(op, option, p, arg);
 						}
-						if (option == U"name_pos") {
-							setArgument(op, option, np, arg);
-							namePos = np;
-							processStack.back().windowText.namePos = np;
+						if (option == U"mes_offset") {
+							setArgument(op, option, mo, arg);
+						}
+						if (option == U"name_offset") {
+							setArgument(op, option, no, arg);
 						}
 						if (option == U"mes_size") {
 							setArgument(op, option, ms, arg);
-							defaultMessageSize = ms;
-							processStack.back().windowText.defaultMessageSize = ms;
 						}
 						if (option == U"name_size") {
 							setArgument(op, option, ns, arg);
-							defaultNameSize = ns;
-							processStack.back().windowText.defaultNameSize = ns;
 						}
 						if (option == U"layer") {
 							setArgument(op, option, l, arg);
-							layer = l;
-							processStack.back().windowText.layer = l;
+						}
+						if (option == U"line_break") {
+							setArgument(op, option, lb, arg);
+						}
+						if (option == U"font_path") {
+							setArgument(op, option, fp, arg);
+						}
+						if (option == U"bg_path") {
+							setArgument(op, option, bgp, arg);
 						}
 					}
+					processStack.back().windowText.setWindowConfig(p, mo, no, ms, ns, l, lb, fp, bgp);
+				}
+
+				if (op == U"mes_link") {
+					String n = U"";
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+					}
+					processStack.back().windowText.linked_tag << n;
+				}
+
+				if (op == U"mes_unlink") {
+					String n = U"";
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+					}
+					processStack.back().windowText.linked_tag.remove_if([tag = n](const String& s) { return s == tag; });
+				}
+
+				if (op == U"wait_icon") {
+					FilePath fp = U"";
+					Point os = Point::Zero();
+					Size s = Size::Zero();
+
+					for (auto [option, arg] : args) {
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
+						if (option == U"size") {
+							setArgument(op, option, s, arg);
+						}
+					}
+
+					Image img{ fp };
+					s = s.isZero() ? img.size() : s;
+
+					processStack.back().windowText.setWaitIcon(fp, s);
 				}
 
 				if (op == U"setimg") {
@@ -567,10 +634,11 @@ void Engine::readScript() {
 
 					auto i = std::make_shared<Graphic>(Graphic{ fp, p, si, s, 0.0, l, n });
 
-					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
+					std::function<bool()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
 						processStack.back().graphics.emplace_back(img);
 						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
 							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 								if ((*itr)->getTag() == tag) {
@@ -581,15 +649,14 @@ void Engine::readScript() {
 
 							time += Scene::DeltaTime();
 
-							if (time >= fade) {
+							if (time >= _fa) {
 								return true;
 							}
 
 							return false;
 						};
-					};
-
-					addSubProcess(f());
+					}();
+					addSubProcess(f);
 				}
 
 				if (op == U"setbtn") {
@@ -600,9 +667,10 @@ void Engine::readScript() {
 					Size si = Size::Zero();
 					String e = U"";
 					String r = U"";
-					String jt = U"";
+					String jt = U"call";
 					String li = scriptStack.back().reader.path();
 					String d = U"";
+					bool ol = false;
 
 					double fa = 0; // フェードインにかかる時間
 					double s = 1.0;
@@ -652,14 +720,17 @@ void Engine::readScript() {
 						if (option == U"dst") {
 							setArgument(op, option, d, arg);
 						}
+						if (option == U"overlap") {
+							setArgument(op, option, ol, arg);
+						}
 					}
 
 					Image img{ nor }; //画像サイズの計算のために一時的にImageを作成
 					si = si.isZero() ? img.size() : si;
 
-					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, r, jt, li, d, this });
+					auto i = std::make_shared<Button>(Button{ nor, hov, cli, p, si, s, 0.0, l, n, e, r, jt, li, d, ol, this });
 
-					std::function<std::function<bool()>()> f = [&, this, img = i, _n = n, _fa = fa]() {
+					std::function<bool()> f = [&, this, img = i, _n = n, _fa = fa]() {
 						double time = 0.0;
 						processStack.back().graphics.emplace_back(img);
 						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
@@ -679,9 +750,9 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"setsldr") {
@@ -738,15 +809,142 @@ void Engine::readScript() {
 					auto s = std::make_shared<Slider>(Slider{ knob, back, back_sub, p, ksi, bsi, l, n, max, min, def, e, this });
 
 
-					std::function<std::function<bool()>()> f = [&, this, silder = s, _n = n]() {
+					std::function<bool()> f = [&, this, silder = s, _n = n]() {
 						processStack.back().graphics.emplace_back(silder);
 						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
 						return [&, this, tag = _n]() mutable {
 							return true;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
+				}
+
+				if (op == U"setchar") {
+					String n = U""; // タグの名前
+					FilePath fp = U"";
+					Point p = Point::Zero();
+					int32 l = 100;
+					Size si = Size::Zero();
+					String cn = U""; // キャラクターの名前
+
+					double fa = 0; // フェードインにかかる時間
+					double s = 1.0;
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+						if (option == U"path") {
+							setArgument(op, option, fp, arg);
+						}
+						if (option == U"pos") {
+							setArgument(op, option, p, arg);
+						}
+						if (option == U"fade") {
+							setArgumentParse(op, option, fa, arg);
+							fa = Max(fa, 0.0);
+						}
+						if (option == U"size") {
+							setArgument(op, option, si, arg);
+						}
+						if (option == U"scale") {
+							setArgumentParse(op, option, s, arg);
+							s = Max(s, 0.0);
+						}
+						if (option == U"layer") {
+							setArgument(op, option, l, arg);
+						}
+						if (option == U"name") {
+							setArgument(op, option, cn, arg);
+						}
+					}
+
+					Image img{ fp }; //画像サイズの計算のために一時的にImageを作成
+					si = si.isZero() ? img.size() : si;
+
+					auto i = std::make_shared<Character>(Character{ fp, p, si, s, 0.0, l, n, cn });
+
+					std::function<bool()> f = [&, this, img = i, _n = n, _fa = fa]() {
+						double time = 0.0;
+						processStack.back().graphics.emplace_back(img);
+						processStack.back().graphics.stable_sort_by([](const std::shared_ptr<Graphic>& a, const std::shared_ptr<Graphic>& b) { return a->getLayer() < b->getLayer(); });
+						return [&, this, time, tag = _n, fade = _fa]() mutable {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
+									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
+									(*itr)->setOpacity(t);
+								}
+							}
+
+							time += Scene::DeltaTime();
+
+							if (time >= fade) {
+								return true;
+							}
+
+							return false;
+						};
+					}();
+
+					addSubProcess(f);
+				}
+
+				if (op == U"speakchar") {
+					String n = U""; // タグの名前
+					FilePath fp;
+					double fa = 0; // フェードインにかかる時間
+
+					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+						if (option == U"path") {
+							setArgumentParse(op, option, fa, arg);
+							fa = Max(fa, 0.0);
+						}
+						if (option == U"fade") {
+							setArgumentParse(op, option, fa, arg);
+							fa = Max(fa, 0.0);
+						}
+					}
+
+					std::function<bool()> f = [&, this, _t = n, _fp = fp, _fa = fa]() {
+						double time = 0.0;
+						for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
+							if ((*itr)->getTag() == _t) {
+								if (auto ptr = std::dynamic_pointer_cast<Character>((*itr))) {
+									ptr->setNextPath(_fp);
+									ptr->setNextTexture();
+									processStack.back().windowText.name = ptr->getName();
+								}
+							}
+						}
+						return [&, this, time, tag = _t, filepath = _fp, fade = _fa]() mutable {
+							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
+								if ((*itr)->getTag() == tag) {
+									double t = fade > 0 ? Clamp(time / fade, 0.0, 1.0) : 1.0;
+									(*itr)->setOpacity(1.0 - t);
+								}
+							}
+
+							time += Scene::DeltaTime();
+
+							if (time >= fade) {
+								for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
+									if ((*itr)->getTag() == tag) {
+										(*itr)->changeTexture();
+										(*itr)->setOpacity(1.0);
+									}
+								}
+								return true;
+							}
+
+							return false;
+						};
+					}();
+
+					addSubProcess(f);
 				}
 
 				if (op == U"change") {
@@ -767,7 +965,7 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _t = n, _fp = fp, _fa = fa]() {
+					std::function<bool()> f = [&, this, _t = n, _fp = fp, _fa = fa]() {
 						double time = 0.0;
 						for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
 							if ((*itr)->getTag() == _t) {
@@ -797,9 +995,9 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"moveto") {
@@ -825,7 +1023,7 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _ta = n, _dst = d, _dur = dur, _del = del]() {
+					std::function<bool()> f = [&, this, _ta = n, _dst = d, _dur = dur, _del = del]() {
 						double time = 0.0;
 						Vec2 src, dst;
 
@@ -861,9 +1059,9 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"moveby") {
@@ -889,7 +1087,7 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _ta = n, _by = by, _dur = dur, _del = del]() {
+					std::function<bool()> f = [&, this, _ta = n, _by = by, _dur = dur, _del = del]() {
 						double time = 0.0;
 						Vec2 src, dst;
 
@@ -924,9 +1122,9 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"delete") {
@@ -944,7 +1142,7 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _n = n, _fa = fa]() {
+					std::function<bool()> f = [&, this, _n = n, _fa = fa]() {
 						double time = 0.0;
 						return [&, this, time, tag = _n, fade = _fa]() mutable {
 							for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
@@ -970,17 +1168,25 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"music") {
 					//filepath, ...option
+					String n = U"";
 					FilePath fp;
 					bool l = false;
+					double v = 1.0;
 					double st = 0.0, lst = -1.0, led = -1.0;
 					for (auto [option, arg] : args) {
+						if (option == U"tag") {
+							setArgument(op, option, n, arg);
+						}
+						if (option == U"volume") {
+							setArgument(op, option, v, arg);
+						}
 						if (option == U"path") {
 							setArgument(op, option, fp, arg);
 						}
@@ -1007,17 +1213,16 @@ void Engine::readScript() {
 					}
 					musicPath = fp;
 
-					std::function<std::function<bool()>()> f = [&, this, _a = a, _st = st]() {
-						double time = 0.0;
-						return [&, this, audio = _a, time]() mutable {
-							nowMusic = audio;
-							nowMusic.seekTime(_st);
-							nowMusic.play(MixBus0);
-							return true;
-						};
+					std::function<bool()> f = [&, this, tag = n, audio = a, volume = v, spos = st]() mutable {
+						audio.setVolume(volume);
+						audio.seekTime(spos);
+						audio.play(MixBus0);
+						musics.emplace(tag, audio);
+						Console << U"music loaded 3";
+						return true;
 					};
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"sound") {
@@ -1030,16 +1235,17 @@ void Engine::readScript() {
 					}
 					Audio a{ Audio::Stream, fp };
 					
-					std::function<std::function<bool()>()> f = [&, this, _a = a]() {
+					std::function<bool()> f = [&, this, _a = a]() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
 							processStack.back().sounds.emplace_back(audio);
-							processStack.back().sounds.back().play(MixBus1);
+							if(!getData().isSkip)
+								processStack.back().sounds.back().play(MixBus1);
 							return true;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"ambient") {
@@ -1074,7 +1280,7 @@ void Engine::readScript() {
 					}
 					ambientPath = fp;
 
-					std::function<std::function<bool()>()> f = [&, this, _a = a, _st = st]() {
+					std::function<bool()> f = [&, this, _a = a, _st = st]() {
 						double time = 0.0;
 						return [&, this, audio = _a, time]() mutable {
 							nowAmbient = audio;
@@ -1082,9 +1288,9 @@ void Engine::readScript() {
 							nowAmbient.play(MixBus2);
 							return true;
 						};
-					};
+					}();
 
-					addSubProcess(f());
+					addSubProcess(f);
 				}
 
 				if (op == U"volmusic") {
@@ -1126,7 +1332,7 @@ void Engine::readScript() {
 						}
 					}
 
-					std::function<std::function<bool()>()> f = [&, this, _t = t]() {
+					std::function<bool()> f = [&, this, _t = t]() {
 						double time = 0.0;
 						return [&, this, time, duration = _t]() mutable {
 							if (time >= duration) {
@@ -1136,9 +1342,9 @@ void Engine::readScript() {
 
 							return false;
 						};
-					};
+					}();
 
-					setMainProcess(f());
+					setMainProcess(f);
 				}
 
 				if (op == U"choice") {
@@ -1202,10 +1408,11 @@ void Engine::readScript() {
 					scriptStack.pop_back();
 					scriptStack << ScriptData{reader, i, i};
 					if (isStopNow) {
-						processStack.back().mainStack.pop_front();
-						initMainProcess();
 						isStopNow = false;
 					}
+					//Console << U"size: " << processStack.back().mainStack.size();
+					//processStack.back().mainStack.pop_front();
+					//initMainProcess();
 				}
 
 				if (op == U"stop") {
@@ -1262,6 +1469,22 @@ void Engine::readScript() {
 					ifSkipFlag = false;
 				}
 
+				if (op == U"for") {
+
+				}
+
+				if (op == U"endfor") {
+
+				}
+
+				if (op == U"while") {
+
+				}
+
+				if (op == U"endwhile") {
+
+				}
+
 				if (op == U"scenechange") {
 					// filename
 					FilePath fp;
@@ -1289,6 +1512,7 @@ void Engine::readScript() {
 					// filename
 					FilePath link = scriptStack.back().reader.path();
 					String dst;
+					bool ol = false;
 					for (auto [option, arg] : args) {
 						if (option == U"link") {
 							setArgument(op, option, link, arg);
@@ -1296,16 +1520,24 @@ void Engine::readScript() {
 						if (option == U"dst") {
 							setArgument(op, option, dst, arg);
 						}
+						if (option == U"overlap") {
+							setArgument(op, option, ol, arg);
+						}
 					}
 
 					auto [reader, i] = getDistination(link, dst);
 					scriptStack << ScriptData{reader, i, i};
+					initMainProcess(false, ol);
 				}
 
 				if (op == U"return") {
 					scriptStack.pop_back();
+					if (processStack.back().isOverlap) {
+						processStack.pop_back();
+					}
 				}
 
+				/*
 				if (op == U"sleeppr") {
 					bool sf = false;
 					for (auto [option, arg] : args) {
@@ -1320,7 +1552,9 @@ void Engine::readScript() {
 
 					processStack << Process{sf};
 				}
+				*/
 
+				/*
 				if (op == U"awakepr") {
 					processStack.pop_back();
 
@@ -1328,6 +1562,7 @@ void Engine::readScript() {
 						itr->play();
 					}
 				}
+				*/
 
 				if (op == U"input") {
 					String who;
@@ -1335,6 +1570,7 @@ void Engine::readScript() {
 					String jumptype = U"";
 					String link = scriptStack.back().reader.path();
 					String dst = U"";
+					bool ol = false;
 					for (auto [option, arg] : args) {
 						if (option == U"who") {
 							setArgument(op, option, who, arg);
@@ -1357,9 +1593,12 @@ void Engine::readScript() {
 						if (option == U"dst") {
 							setArgument(op, option, dst, arg);
 						}
+						if (option == U"overlap") {
+							setArgument(op, option, ol, arg);
+						}
 					}
 
-					InputProcess ip{ who, down_exp, press_exp, up_exp, jumptype, link, dst };
+					InputProcess ip{ who, down_exp, press_exp, up_exp, jumptype, link, dst, ol };
 					ip.init(this);
 					processStack.back().continueList << std::make_shared<InputProcess>(ip);
 				}
@@ -1490,24 +1729,27 @@ void Engine::skipLineForIf() {
 	}
 }
 
-void Engine::initMainProcess() {
-	processStack.back().mainStack << [&, this]() { return true; };
+void Engine::initMainProcess(bool saveflag, bool isOverlap) {
+	if (isOverlap) {
+		processStack << Process{saveflag, isOverlap};
+	}
+	std::function<bool()> init_mainProcess = [&, this]() { return true; };
+	processStack.back().mainStack.emplace_back(std::make_shared<std::function<bool()>>(init_mainProcess));
 }
 
 bool Engine::exeMainProcess() {
-	if ((processStack.back().mainStack.front())()) {
+	if ((*processStack.back().mainStack.front())()) {
 		processStack.back().mainStack.pop_front();
 	}
 	return processStack.back().mainStack.isEmpty();
 }
 
-void Engine::resetTextWindow(Array<String> strs) {
-	for (auto itr = strs.begin(); itr != strs.end(); ++itr) {
-		scenarioLog << *itr;
-	}
-
+void Engine::resetTextWindow() {
 	sentenceStorage = U"";
-	processStack.back().windowText = WindowText{ messagePos, namePos, defaultMessageSize, defaultNameSize, layer };
+	processStack.back().windowText.resetWindow();
+	//WindowText wt = processStack.back().windowText;
+	//processStack.back().windowText = WindowText{ wt.messagePos, wt.namePos, wt.defaultMessageSize, wt.defaultNameSize, wt.layer };
+	allowTextSkip = true;
 }
 
 void Engine::setSaveVariable() {
@@ -1519,6 +1761,7 @@ void Engine::setSaveVariable() {
 }
 
 void Engine::update() {
+
 	// Printをクリア
 	ClearPrint();
 
@@ -1536,16 +1779,29 @@ void Engine::update() {
 		return;
 	}
 
+	// スキップ周り
+	if ((MouseL | MouseR).down()) {
+		getData().isSkip = false;
+	}
+
+	// UI非表示周り
+	if (isClosed && (MouseL | MouseR).down()) {
+		isClosed = false;
+		allowTextSkip = false;
+	}
+
+	auto exeProcess = processStack.back();
+
 	// 継続処理
-	for (auto itr = processStack.back().continueList.begin(); itr != processStack.back().continueList.end(); ++itr) {
+	for (auto itr = exeProcess.continueList.begin(); itr != exeProcess.continueList.end(); ++itr) {
 		(*itr)->invoke();
 	}
 
 
 	// サブ処理(並列可能処理)実行
-	for (auto itr = processStack.back().subList.begin(); itr != processStack.back().subList.end();) {
-		if ((*itr)()) {
-			itr = processStack.back().subList.erase(itr);
+	for (auto itr = exeProcess.subList.begin(); itr != exeProcess.subList.end();) {
+		if ((**itr)()) {
+			itr = exeProcess.subList.erase(itr);
 		}
 		else {
 			++itr;
@@ -1553,27 +1809,29 @@ void Engine::update() {
 	}
 
 	// 画像系の逐次処理
-	for (auto itr = processStack.back().graphics.begin(); itr != processStack.back().graphics.end(); ++itr) {
+	for (auto itr = exeProcess.graphics.begin(); itr != exeProcess.graphics.end(); ++itr) {
 		(*itr)->update();
 	}
 
 	// 音声が停止したら配列から削除
-	for (auto itr = processStack.back().sounds.begin(); itr != processStack.back().sounds.end();) {
+	for (auto itr = exeProcess.sounds.begin(); itr != exeProcess.sounds.end();) {
 		if (!itr->isPlaying()) {
-			itr = processStack.back().sounds.erase(itr);
+			itr = exeProcess.sounds.erase(itr);
 		}
 		else {
 			++itr;
 		}
 	}
 
-
 	// メイン処理実行
 	if (exeMainProcess()) {
 		// 処理が終わったら次の処理を読み込む
 		readScript();
 	}
+	// ボタンをクリックしたときにテキストが進まないための変数
+	allowTextSkip = true;
 
+	/*
 	// クイックセーブ
 	if (KeyS.down()) {
 		dataSave();
@@ -1584,10 +1842,13 @@ void Engine::update() {
 		dataLoad();
 	}
 
+	*/
+
 	// リロード（デバッグ用）
 	if (KeyR.down()) {
 		changeScene(GameScene::Engine);
 	}
+
 }
 
 void Engine::draw() const {
@@ -1619,26 +1880,25 @@ void Engine::draw() const {
 		return;
 	}
 
-	
-	bool messageDrawFlag = false;
-	int32 meslayer = processStack.back().windowText.layer;
+
 	for (auto i : step(processStack.size())) {
 		int32 nowlayer = INT32_MIN, prevlayer = INT32_MIN;
+		int32 meslayer = processStack.at(i).windowText.getLayer();
+		WindowText wt = processStack.at(i).windowText;
+
 		for (auto itr = processStack.at(i).graphics.begin(); itr != processStack.at(i).graphics.end(); ++itr) {
-			prevlayer = nowlayer;
-			nowlayer = (*itr)->getLayer();
-			if (!messageDrawFlag && i == processStack.size() - 1) {
-				if (prevlayer <= meslayer && meslayer < nowlayer) {
-					processStack.back().windowText.draw();
-					messageDrawFlag = true;
-				}
+			if (!wt.linked_tag.contains((*itr)->getTag()) || !isClosed) {
+				(*itr)->draw();
 			}
 
-			(*itr)->draw();
+			prevlayer = nowlayer;
+			nowlayer = (*itr)->getLayer();
+			if (prevlayer <= meslayer && meslayer < nowlayer) {
+				if (!isClosed) {
+					wt.draw();
+				}
+			}
 		}
-	}
-	if (!messageDrawFlag) {
-		processStack.back().windowText.draw();
 	}
 
 
@@ -1682,6 +1942,9 @@ void Engine::dataSave() {
 	Serializer<BinaryWriter> writer{ savefile };
 	if (!writer) throw Error{U"Failed to open SaveFile"};
 
+
+	/*
+
 	// script
 	Array<FilePath> scriptPathList;
 	Array<size_t> scriptSaveIndexList;
@@ -1722,6 +1985,9 @@ void Engine::dataSave() {
 			else if (typeid(*(*itr2)) == typeid(Engine::Slider)) {
 				gtl_tmp << U"Slider";
 			}
+			else if (typeid(*(*itr2)) == typeid(Engine::Character)) {
+				gtl_tmp << U"Character";
+			}
 		}
 		graphicsTypeList << gtl_tmp;
 	}
@@ -1745,58 +2011,25 @@ void Engine::dataSave() {
 				shared_ptr<Slider> sp = std::dynamic_pointer_cast<Slider>(*itr2);
 				writer(*sp);
 			}
+			if (gt.front() == U"Character") {
+				shared_ptr<Character> sp = std::dynamic_pointer_cast<Character>(*itr2);
+				writer(*sp);
+			}
 			gt.pop_front();
 		}
 	}
 
 	// メッセージウィンドウ情報保存
-	writer(messagePos);
-	writer(namePos);
-	writer(defaultMessageSize);
-	writer(defaultNameSize);
-	writer(layer);
 	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
 		if (!itr->saveFlag) continue;
 		writer(itr->windowText);
 	}
 
 	writer(musicPath);
+	*/
 
 
 	// 変数書き込み
-	/*
-	Array<VariableKey> k_tmp;
-	Array<v_type> v_tmp;
-	Array<String> t_tmp;
-	for (auto [k, v] : variable) {
-		k_tmp << k;
-		v_tmp << v;
-		if (auto* p = std::get_if<int32>(&v)) {
-			t_tmp << U"int";
-		}
-		else if (auto* p = std::get_if<String>(&v)) {
-			t_tmp << U"string";
-		}
-		else if (auto* p = std::get_if<double>(&v)) {
-			t_tmp << U"double";
-		}
-		else if (auto* p = std::get_if<bool>(&v)) {
-			t_tmp << U"bool";
-		}
-		else if (auto* p = std::get_if<Point>(&v)) {
-			t_tmp << U"point";
-		}
-	}
-
-	writer(t_tmp); //保存する変数の型のリスト
-	for (auto i : step(k_tmp.size())) {
-		writer(k_tmp[i]); // 変数名
-		std::visit([&writer](auto& x) {
-			writer(x); // 値
-		}, v_tmp[i]);
-	}
-	// -------
-	*/
 
 	Print << U"Saved!";
 
@@ -1831,6 +2064,7 @@ void Engine::dataLoad() {
 	Deserializer<BinaryReader> reader{ savefile };
 	if (!reader) throw Error{ U"Failed to open SaveFile" };
 
+	/*
 	scriptStack = {};
 	Array<FilePath> scriptPathList;
 	Array<size_t> scriptSaveIndexList;
@@ -1881,17 +2115,17 @@ void Engine::dataLoad() {
 				sl.setEnginePointer(this);
 				processStack.back().graphics << std::make_shared<Slider>(sl);
 			}
+			else if (*itr == U"Character") {
+				Character ch;
+				reader(ch);
+				ch.setTexture();
+				processStack.back().graphics << std::make_shared<Character>(ch);
+			}
 		}
 	}
-
 	Console << U"graphic loaded";
 
 	// メッセージウィンドウ
-	reader(messagePos);
-	reader(namePos);
-	reader(defaultMessageSize);
-	reader(defaultNameSize);
-	reader(layer);
 	for (auto itr = processStack.begin(); itr != processStack.end(); ++itr) {
 		WindowText wt;
 		reader(wt);
@@ -1908,52 +2142,13 @@ void Engine::dataLoad() {
 		Audio a{ Audio::Stream, musicPath };
 		a.play(MixBus0);
 	}
-
-	/*
-	variable.clear();
-	Array<String> typeList;
-	reader(typeList); //変数リスト
-	for (String t : typeList) {
-		VariableKey k;
-		v_type v;
-
-		reader(k);
-		if (t == U"int") {
-			int32 _;
-			reader(_);
-			v = _;
-		}
-		else if (t == U"string") {
-			String _;
-			reader(_);
-			v = _;
-		}
-		else if (t == U"bool") {
-			bool _;
-			reader(_);
-			v = _;
-		}
-		else if (t == U"double") {
-			double _;
-			reader(_);
-			v = _;
-		}
-		else if (t == U"point") {
-			Point _;
-			reader(_);
-			v = _;
-		}
-
-		variable[k] = v;
-	}
-	*/
-
 	// 実行中の各種処理を初期化
 	// resetTextWindow({});
 	sentenceStorage = U"";
 
 	// processStack.back().subList.clear();
 	// subProcesses.clear();
+	*/
 
 	Print << U"Loaded!";
 
@@ -1962,8 +2157,19 @@ void Engine::dataLoad() {
 }
 
 void Engine::WindowText::draw() const {
-	FontAsset(U"Medium{}"_fmt(defaultNameSize))(name).draw(namePos, Palette::White);
-	FontAsset(U"Medium{}"_fmt(defaultMessageSize))(message.substr(0, index)).draw(messagePos, Palette::White);
+	if (background) background.draw(windowPos);
+	defaultNameFont(name).draw(windowPos + nameOffset, Palette::White);
+
+	Point messagePos = windowPos + messageOffset;
+	String message_text = message.substr(0, index);
+	Font message_font = defaultMessageFont;
+	DrawableText message_dt = message_font(message_text);
+	message_dt.draw(messagePos, Palette::White);
+
+	if (message && index >= message.size()) {
+		Point offset = Point{ defaultMessageSize * lineBreakNumber, message_font.height() * (message_text.split('\n').size() - 1) + (int32)(message_font.height() * 0.25)};
+		waitIcon.resized(waitIconSize).draw(messagePos + offset);
+	}
 }
 
 void Engine::Graphic::update() {}
@@ -1979,6 +2185,10 @@ void Engine::Graphic::draw() const {
 }
 
 void Engine::Button::update() {
+	if (engine->isClosed && engine->processStack.back().windowText.linked_tag.contains(tag)) {
+		return;
+	}
+
 	if (Rect{ position.asPoint(), size }.mouseOver()) {
 		Cursor::RequestStyle(CursorStyle::Hand);
 	}
@@ -1988,26 +2198,42 @@ void Engine::Button::update() {
 			if (role == U"auto") {
 				engine->getData().isAuto = !engine->getData().isAuto;
 			}
+			else if (role == U"skip") {
+				engine->getData().isSkip = !engine->getData().isSkip;
+				engine->getData().isAuto = false;
+			}
+			else if (role == U"close") {
+				engine->isClosed = true;
+			}
 			else {
 				throw Error{U"role error"};
 			}
 		}
 		else {
-			engine->interprete(expr);
+			if(expr == U"") engine->interprete(expr);
 
 			auto [reader, i] = engine->getDistination(link, dst);
 			if (jumptype) {
 				if (jumptype == U"goto") {
 					engine->scriptStack.pop_back();
-				}
-				engine->scriptStack << ScriptData{reader, i, i};
-				if (engine->isStopNow) {
+					engine->scriptStack << ScriptData{reader, i, i};
 					engine->processStack.back().mainStack.pop_front();
-					engine->initMainProcess();
+					engine->initMainProcess(false, false);
+				}
+				else {
+					engine->scriptStack << ScriptData{reader, i, i};
+					engine->initMainProcess(false, isOverlap);
+					Console << U"call!";
+				}
+				if (engine->isStopNow) {
 					engine->isStopNow = false;
 				}
 			}
+
+			// Console << engine->processStack.back().windowText.name;
+			// Console << engine->processStack.back().windowText.message;
 		}
+		engine->allowTextSkip = false;
 	}
 }
 
@@ -2046,6 +2272,20 @@ void Engine::Slider::draw() const {
 	texture.resized(size).drawAt((position + Vec2(width * (now - min), backSize.y / 2)).asPoint());
 }
 
+void Engine::Character::update() {
+	nowImageIndex = 0;
+}
+
+void Engine::Character::draw() const {
+	if (nextTextures) {
+		textures.at(nowImageIndex).resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
+		nextTextures.at(0).resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
+	}
+	else {
+		textures.at(nowImageIndex).resized(size).scaled(scale).draw(position, ColorF{ 1.0, opacity });
+	}
+}
+
 void Engine::InputProcess::init(Engine* e) {
 	engine = e;
 	input = ElephantLib::stringToInput[who];
@@ -2059,11 +2299,15 @@ void Engine::InputProcess::invoke() {
 		if (jumptype) {
 			if (jumptype == U"goto") {
 				engine->scriptStack.pop_back();
-			}
-			engine->scriptStack << ScriptData{reader, i, i};
-			if (engine->isStopNow) {
+				engine->scriptStack << ScriptData{reader, i, i};
 				engine->processStack.back().mainStack.pop_front();
-				engine->initMainProcess();
+				engine->initMainProcess(false, false);
+			}
+			else {
+				engine->scriptStack << ScriptData{reader, i, i};
+				engine->initMainProcess(false, isOverlap);
+			}
+			if (engine->isStopNow) {
 				engine->isStopNow = false;
 			}
 		}

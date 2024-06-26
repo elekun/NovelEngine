@@ -15,6 +15,15 @@ public:
 	void update() override;
 	void draw() const override;
 
+	std::function<std::function<bool()>()> test_closure = []() {
+		int32 count = 0;
+		return [&, count]() mutable {
+			Console << U"count: " << ++count;
+			return true;
+		};
+	};
+	std::function<bool()> tc;
+
 private:
 	// ゲーム内変数
 	v_type stringToVariable(String type = U"string", String v = U"");
@@ -52,47 +61,69 @@ private:
 	// 全処理共通変数
 	// String operateLine; // 要らないかも。要検討
 	bool isStopNow;
-	void initMainProcess();
+	void initMainProcess(bool saveflag, bool isOverlap);
 	bool exeMainProcess();
 
 
 	// テキスト表示用変数
 	InputGroup proceedInput;
 
-	Point messagePos;
-	Point namePos;
-	int32 defaultMessageSize;
-	int32 defaultNameSize;
-	int32 layer;
-	struct WindowText {
-	public:
-		Point messagePos;
-		Point namePos;
+	class WindowText {
+	private:
+		Point windowPos;
+		Point messageOffset;
+		Point nameOffset;
 		int32 defaultMessageSize;
 		int32 defaultNameSize;
 		int32 layer;
-
+		int32 lineBreakNumber;
+		FilePath backgroundPath;
+		Texture background;
+		FilePath fontpath;
+		Font defaultNameFont;
+		Font defaultMessageFont;
+		HashTable<String, Font> fonts;
+		Texture waitIcon;
+		Size waitIconSize;
+	public:
 		size_t index;
 		double indexCT;
 		String message;
 		String name;
 
+		Array<String> linked_tag;
+
 		double time;
 		Audio voice;
 
-		WindowText() : index(0), indexCT(0.0), message(U""), name(U""), time(0.0) {};
-		WindowText(Point mp, Point np, int32 ms, int32 ns, int32 l)
-			: messagePos(mp), namePos(np), defaultMessageSize(ms), defaultNameSize(ns), layer(l), index(0), indexCT(0.0), message(U""), name(U""), time(0.0) {};
+		WindowText() : index(0), indexCT(0.0), message(U""), name(U""), time(0.0), linked_tag({}) {};
+		void setWindowConfig(Point p, Point mo, Point no, int32 ms, int32 ns, int32 l, int32 lb, FilePath fp, FilePath bgp) {
+			windowPos = p; messageOffset = mo; nameOffset = no; defaultMessageSize = ms; defaultNameSize = ns; layer = l; lineBreakNumber = lb;
+			fontpath = fp;
+			backgroundPath = bgp;
+			background = Texture{ bgp };
+			defaultMessageFont = Font{ defaultMessageSize, fontpath };
+			defaultNameFont = Font{ defaultNameSize, fontpath };
+		}
+		void setWaitIcon(FilePath fp, Size s) {
+			waitIcon = Texture{ fp };
+			waitIconSize = s;
+		};
+		void resetWindow() {
+			index = 0; indexCT = 0.0; message = U""; time = 0.0;
+		}
+		int32 getLayer() const { return layer; }
 		void draw() const;
 
 		template <class Archive>
-		void SIV3D_SERIALIZE(Archive& archive) { archive(messagePos, namePos, defaultMessageSize, defaultNameSize, layer, index, indexCT, message, name); };
+		void SIV3D_SERIALIZE(Archive& archive) { archive(windowPos, messageOffset, nameOffset, defaultMessageSize, defaultNameSize, layer, fontpath, backgroundPath, index, indexCT, message, name); };
 	};
 
 	String sentenceStorage;
-	bool checkAuto;
+	bool allowTextSkip;
+	bool isClosed; //UI表示非表示
 
-	void resetTextWindow(Array<String> strs);
+	void resetTextWindow();
 
 	// 画面全体処理
 	double sceneFade; // シーンのフェードの進行度 range: 0.0 - 1.0
@@ -154,11 +185,12 @@ private:
 		String jumptype; // goto or call
 		String link; // jump先のスクリプト
 		String dst; // スクリプト内のjump先
+		bool isOverlap;
 
 	public:
 		Button() : Graphic{} {};
-		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, String jt, String li, String d, Engine* en) :
-			hover(Texture{ h }), hoverPath(h), click(Texture{ c }), clickPath(c), expr(e), role(r), engine(en), jumptype(jt), link(li), dst(d), Graphic{n, p, s, sc, o, l, t} {};
+		Button(FilePath n, FilePath h, FilePath c, Vec2 p, Size s, double sc, double o, int32 l, String t, String e, String r, String jt, String li, String d, bool ol, Engine* en) :
+			hover(Texture{ h }), hoverPath(h), click(Texture{ c }), clickPath(c), expr(e), role(r), engine(en), jumptype(jt), link(li), dst(d), isOverlap(ol), Graphic{n, p, s, sc, o, l, t} {};
 
 		void setPath(String p, String h, String c) { path = p; hoverPath = h; clickPath = c; };
 		void setTexture() override { texture = Texture{ path }; hover = Texture{ hoverPath }; click = Texture{ clickPath }; };
@@ -205,6 +237,47 @@ private:
 		void update() override;
 		void draw() const override;
 	};
+	class Character : public Graphic {
+	protected:
+		Array<Texture> textures;
+		FilePath folderPath;
+		Array<Texture> nextTextures;
+		FilePath nextFolderPath;
+		int32 nowImageIndex;
+		String name;
+	public:
+		Character() : Graphic{} {};
+		Character(FilePath fp, Vec2 p, Size s, double sc, double o, int32 l, String t, String n) : folderPath(fp), nextFolderPath(U""), nextTextures({}), name(n) {
+			position = p; size = s; scale = sc; opacity = o; layer = l; tag = t;
+			nowImageIndex = 0;
+			setTexture();
+
+		}
+		String getName() { return name;  };
+		void setPath(String p) { folderPath = p; };
+		virtual void setTexture() {
+			Array<FilePath> pathList = FileSystem::DirectoryContents(folderPath, Recursive::No);
+			for (auto itr = pathList.begin(); itr != pathList.end(); ++itr) {
+				if (!FileSystem::Extension(*itr)) continue;
+				textures << Texture{ *itr };
+			}
+		};
+		void setNextPath(String p) { nextFolderPath = p; };
+		virtual void setNextTexture() {
+			Array<FilePath> pathList = FileSystem::DirectoryContents(nextFolderPath, Recursive::No);
+			for (auto itr = pathList.begin(); itr != pathList.end(); ++itr) {
+				if (!FileSystem::Extension(*itr)) continue;
+				nextTextures << Texture{ *itr };
+			}
+		};
+		virtual void changeTexture() { folderPath = nextFolderPath; textures = nextTextures; nextFolderPath = U""; nextTextures = {}; nowImageIndex = 0; };
+
+		template <class Archive>
+		void SIV3D_SERIALIZE(Archive& archive) { archive(folderPath, position, size, scale, opacity, layer, tag, nextFolderPath, nowImageIndex, name); };
+
+		void update() override;
+		void draw() const override;
+	};
 
 	// 選択肢ボタン用変数
 	struct Choice{
@@ -244,6 +317,7 @@ private:
 
 	Audio nowMusic; // BGM
 	FilePath musicPath;
+	HashTable<String, Audio> musics;
 	Audio nowAmbient; // 環境音楽
 	FilePath ambientPath;
 
@@ -263,10 +337,11 @@ private:
 		String link;
 		String dst;
 		Input input;
+		bool isOverlap;
 
 		InputProcess() {};
-		InputProcess(String w, String de, String pe, String ue, String jt, String l, String d)
-			: who(w), down_exp(de), press_exp(pe), up_exp(ue), jumptype(jt), link(l), dst(d){};
+		InputProcess(String w, String de, String pe, String ue, String jt, String l, String d, bool ol)
+			: who(w), down_exp(de), press_exp(pe), up_exp(ue), jumptype(jt), link(l), dst(d), isOverlap(ol){};
 		void init(Engine* e);
 		void invoke() override;
 	};
@@ -298,17 +373,23 @@ private:
 
 	struct Process {
 	public:
-		Process() : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(false) {};
-		Process(bool sf) : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(sf) {};
-		Array<std::function<bool()>> mainStack; // メイン処理のキュー
-		Array<std::function<bool()>> subList; // サブ処理のリスト
+		Process() : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(false), windowText(WindowText{}) {};
+		Process(bool sf, bool ol) : mainStack({}), subList({}), graphics({}), sounds({}), saveFlag(sf), isOverlap(ol), windowText(WindowText{}) {};
+		Array<std::shared_ptr<std::function<bool()>>> mainStack; // メイン処理のキュー
+		// Array<std::function<bool()>> subList; // サブ処理のリスト
+		Array<std::shared_ptr<std::function<bool()>>> subList; // サブ処理のリスト
 		Array<std::shared_ptr<ContinueProcess>> continueList; // 継続処理のリスト
 		Array<std::shared_ptr<Graphic>> graphics; // 画像
 		Array<Audio> sounds; // 効果音
 
 		WindowText windowText;
 
+		Array<Choice> selections;
+		bool isShowSelection;
+
 		bool saveFlag;
+
+		bool isOverlap;
 
 		// template <class Archive>
 		// void SIV3D_SERIALIZE(Archive& archive) { archive(graphics, windowText); };

@@ -51,10 +51,14 @@ struct GameData {
 	HashTable<String, std::shared_ptr<Variable>> system_vars;
 
 	bool isAuto = false;
+	bool isSkip = false;
 	double grobalVolume = 1.0;
 	double musicVolume = 1.0; // MixBus0
 	double soundVolume = 1.0; // MixBus1
 	double voiceVolume = 1.0; // MixBus2
+	double textSpeed = 1.0;
+	double autoSpeed = 1.0;
+	bool isWaitVoice = true;
 };
 
 using GameManager = SceneManager<GameScene, GameData>;

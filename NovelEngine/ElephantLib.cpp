@@ -42,7 +42,7 @@ void ElephantLib::makeArchive(FilePath folder, FilePath output) {
 
 	//ファイル数チェック
 	int32 numberOfFile = 0;
-	for (const auto& a_path : FileSystem::DirectoryContents(folder)) {
+	for (const auto& a_path : FileSystem::DirectoryContents(folder, Recursive::Yes)) {
 		BinaryReader in{ a_path };
 		if (in.size() > 0) {
 			filePathList << FileSystem::RelativePath(a_path, U"./");
